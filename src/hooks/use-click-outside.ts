@@ -1,107 +1,40 @@
-import { useEffect, useRef, RefObject } from "react";
+import * as React from "react";
 
-export function useClickOutside<T extends HTMLElement = HTMLElement>(
+function useClickOutside<T extends HTMLElement = HTMLElement>(
   handler: () => void,
   options?: {
     enabled?: boolean;
-    ignore?: string[];
+    ignoreClass?: string;
   }
-): RefObject<T> {
-  const ref = useRef<T>(null);
-  const enabled = options?.enabled ?? true;
-  const ignore = options?.ignore ?? [];
+): React.RefObject<T> {
+  const ref = React.useRef<T>(null);
+  const { enabled = true, ignoreClass } = options ?? {};
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (!enabled) return;
 
-    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
+    const listener = (event: MouseEvent | TouchEvent) => {
       const target = event.target as Node;
+      if (!ref.current || ref.current.contains(target)) return;
 
-      if (!ref.current || ref.current.contains(target)) {
-        return;
-      }
-
-      for (const selector of ignore) {
-        const ignoredElement = document.querySelector(selector);
-        if (ignoredElement && ignoredElement.contains(target)) {
-          return;
-        }
+      if (ignoreClass) {
+        const targetEl = target as HTMLElement;
+        if (targetEl.closest?.(`.${ignoreClass}`)) return;
       }
 
       handler();
     };
 
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("touchstart", handleClickOutside);
+    document.addEventListener("mousedown", listener);
+    document.addEventListener("touchstart", listener);
 
     return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("touchstart", handleClickOutside);
+      document.removeEventListener("mousedown", listener);
+      document.removeEventListener("touchstart", listener);
     };
-  }, [handler, enabled, ignore]);
+  }, [handler, enabled, ignoreClass]);
 
   return ref;
 }
 
-export function useClickOutsideAll(
-  handlers: Array<{ ref: RefObject<HTMLElement>; handler: () => void }>,
-  options?: {
-    enabled?: boolean;
-  }
-): void {
-  const enabled = options?.enabled ?? true;
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as Node;
-
-      for (const { ref, handler } of handlers) {
-        if (ref.current && !ref.current.contains(target)) {
-          handler();
-        }
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    document.addEventListener("touchstart", handleClickOutside);
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      document.removeEventListener("touchstart", handleClickOutside);
-    };
-  }, [handlers, enabled]);
-}
-
-export function useClickOutsideIfNotContained(
-  handler: () => void,
-  containerRef: RefObject<HTMLElement>,
-  options?: {
-    enabled?: boolean;
-  }
-): void {
-  const enabled = options?.enabled ?? true;
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const handleClick = (event: MouseEvent | TouchEvent) => {
-      const target = event.target as Node;
-
-      if (containerRef.current && !containerRef.current.contains(target)) {
-        handler();
-      }
-    };
-
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("touchstart", handleClick);
-
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("touchstart", handleClick);
-    };
-  }, [handler, containerRef, enabled]);
-}
-
-export default useClickOutside;
+export { useClickOutside };

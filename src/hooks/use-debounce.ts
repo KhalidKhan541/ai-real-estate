@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import * as React from "react";
 
-export function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = React.useState<T>(value);
 
-  useEffect(() => {
+  React.useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedValue(value);
     }, delay);
@@ -16,18 +16,13 @@ export function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue;
 }
 
-export function useDebouncedCallback<T extends (...args: unknown[]) => unknown>(
+function useDebouncedCallback<T extends (...args: unknown[]) => unknown>(
   callback: T,
   delay: number
 ): (...args: Parameters<T>) => void {
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const callbackRef = useRef(callback);
+  const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
-    callbackRef.current = callback;
-  }, [callback]);
-
-  useEffect(() => {
+  React.useEffect(() => {
     return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
@@ -35,63 +30,17 @@ export function useDebouncedCallback<T extends (...args: unknown[]) => unknown>(
     };
   }, []);
 
-  return (...args: Parameters<T>) => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    timeoutRef.current = setTimeout(() => {
-      callbackRef.current(...args);
-    }, delay);
-  };
-}
-
-export function useDebouncedValue<T>(
-  value: T,
-  delay: number,
-  options?: {
-    leading?: boolean;
-    trailing?: boolean;
-  }
-): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-  const lastValueRef = useRef(value);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isInitialRef = useRef(true);
-
-  useEffect(() => {
-    if (isInitialRef.current) {
-      isInitialRef.current = false;
-      return;
-    }
-
-    const leading = options?.leading ?? false;
-    const trailing = options?.trailing ?? true;
-
-    if (leading) {
-      setDebouncedValue(value);
-    }
-
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    if (trailing) {
-      timeoutRef.current = setTimeout(() => {
-        setDebouncedValue(lastValueRef.current);
-      }, delay);
-    }
-
-    lastValueRef.current = value;
-
-    return () => {
+  return React.useCallback(
+    (...args: Parameters<T>) => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
-    };
-  }, [value, delay, options?.leading, options?.trailing]);
-
-  return debouncedValue;
+      timeoutRef.current = setTimeout(() => {
+        callback(...args);
+      }, delay);
+    },
+    [callback, delay]
+  );
 }
 
-export default useDebounce;
+export { useDebounce, useDebouncedCallback };

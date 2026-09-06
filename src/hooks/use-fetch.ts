@@ -1,224 +1,148 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import * as React from "react";
 
-export interface UseFetchOptions<T> {
-  immediate?: boolean;
-  initialData?: T;
+interface UseFetchOptions<T> {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  headers?: Record<string, string>;
+  body?: unknown;
+  enabled?: boolean;
   onSuccess?: (data: T) => void;
   onError?: (error: Error) => void;
-  onFinally?: () => void;
-  transform?: (data: unknown) => T;
+  initialData?: T;
 }
 
-export interface UseFetchResult<T> {
+interface UseFetchResult<T> {
   data: T | undefined;
-  error: Error | undefined;
+  error: Error | null;
   isLoading: boolean;
   isSuccess: boolean;
   isError: boolean;
-  execute: (...args: unknown[]) => Promise<T | undefined>;
-  reset: () => void;
+  refetch: () => Promise<void>;
+  mutate: (data: T | ((prev: T | undefined) => T)) => void;
 }
 
-export function useFetch<T>(
-  fetchFn: (...args: unknown[]) => Promise<T>,
-  options?: UseFetchOptions<T>
-): UseFetchResult<T> {
-  const [data, setData] = useState<T | undefined>(options?.initialData);
-  const [error, setError] = useState<Error | undefined>();
-  const [isLoading, setIsLoading] = useState(false);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const mountedRef = useRef(true);
+function useFetch<T>(url: string, options?: UseFetchOptions<T>): UseFetchResult<T> {
+  const {
+    method = "GET",
+    headers = {},
+    body,
+    enabled = true,
+    onSuccess,
+    onError,
+    initialData,
+  } = options ?? {};
 
-  const { immediate = false, onSuccess, onError, onFinally, transform } = options || {};
+  const [data, setData] = React.useState<T | undefined>(initialData);
+  const [error, setError] = React.useState<Error | null>(null);
+  const [isLoading, setIsLoading] = React.useState(false);
+  const abortControllerRef = React.useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  const fetchData = React.useCallback(async () => {
+    if (!enabled) return;
 
-  const execute = useCallback(
-    async (...args: unknown[]): Promise<T | undefined> => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
+    setIsLoading(true);
+    setError(null);
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          ...headers,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: abortControllerRef.current.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      abortControllerRef.current = new AbortController();
-
-      if (mountedRef.current) {
-        setIsLoading(true);
-        setError(undefined);
-      }
-
-      try {
-        let result = await fetchFn(...args);
-
-        if (transform) {
-          result = transform(result);
-        }
-
-        if (mountedRef.current) {
-          setData(result);
-          setIsLoading(false);
-          isSuccessRef.current = true;
-          onSuccess?.(result);
-        }
-
-        return result;
-      } catch (err) {
-        if (mountedRef.current) {
-          const error = err instanceof Error ? err : new Error(String(err));
-          setError(error);
-          setIsLoading(false);
-          onError?.(error);
-        }
-        return undefined;
-      } finally {
-        if (mountedRef.current) {
-          setIsLoading(false);
-          onFinally?.();
-        }
-      }
-    },
-    [fetchFn, transform, onSuccess, onError, onFinally]
-  );
-
-  const reset = useCallback(() => {
-    setData(options?.initialData);
-    setError(undefined);
-    setIsLoading(false);
-  }, [options?.initialData]);
-
-  useEffect(() => {
-    if (immediate) {
-      execute();
+      const result = await response.json();
+      setData(result);
+      onSuccess?.(result);
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      const error = err instanceof Error ? err : new Error(String(err));
+      setError(error);
+      onError?.(error);
+    } finally {
+      setIsLoading(false);
     }
-  }, [immediate, execute]);
+  }, [url, method, headers, body, enabled, onSuccess, onError]);
 
-  const isSuccessRef = useRef(false);
+  React.useEffect(() => {
+    fetchData();
+
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, [fetchData]);
+
+  const mutate = React.useCallback(
+    (newData: T | ((prev: T | undefined) => T)) => {
+      setData((prev) =>
+        newData instanceof Function ? newData(prev) : newData
+      );
+    },
+    []
+  );
 
   return {
     data,
     error,
     isLoading,
-    isSuccess: isSuccessRef.current && !isLoading && !error,
-    isError: !!error,
-    execute,
-    reset,
+    isSuccess: !isLoading && !error && data !== undefined,
+    isError: !isLoading && error !== null,
+    refetch: fetchData,
+    mutate,
   };
 }
 
-export interface UseQueryOptions<T> extends UseFetchOptions<T> {
-  queryKey?: string[];
-  refetchInterval?: number;
-  staleTime?: number;
-  retry?: number;
-  retryDelay?: number;
-}
+function useMutation<TData, TVariables = unknown>(
+  mutationFn: (variables: TVariables) => Promise<TData>,
+  options?: {
+    onSuccess?: (data: TData, variables: TVariables) => void;
+    onError?: (error: Error, variables: TVariables) => void;
+    onSettled?: () => void;
+  }
+) {
+  const [data, setData] = React.useState<TData | undefined>(undefined);
+  const [error, setError] = React.useState<Error | null>(null);
+  const [isLoading, setIsLoading] = React.useState(false);
 
-export function useQuery<T>(
-  queryFn: () => Promise<T>,
-  options?: UseQueryOptions<T>
-): UseFetchResult<T> & { refetch: () => Promise<T | undefined> } {
-  const result = useFetch(queryFn, options);
-
-  return {
-    ...result,
-    refetch: result.execute,
-  };
-}
-
-export interface UseMutationOptions<T, V> {
-  onSuccess?: (data: T, variables: V) => void;
-  onError?: (error: Error, variables: V) => void;
-  onSettled?: (data: T | undefined, error: Error | undefined, variables: V) => void;
-}
-
-export interface UseMutationResult<T, V> {
-  data: T | undefined;
-  error: Error | undefined;
-  isLoading: boolean;
-  isSuccess: boolean;
-  isError: boolean;
-  mutate: (variables: V) => void;
-  mutateAsync: (variables: V) => Promise<T | undefined>;
-  reset: () => void;
-}
-
-export function useMutation<T, V>(
-  mutationFn: (variables: V) => Promise<T>,
-  options?: UseMutationOptions<T, V>
-): UseMutationResult<T, V> {
-  const [data, setData] = useState<T | undefined>();
-  const [error, setError] = useState<Error | undefined>();
-  const [isLoading, setIsLoading] = useState(false);
-  const mountedRef = useRef(true);
-
-  const { onSuccess, onError, onSettled } = options || {};
-
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const mutateAsync = useCallback(
-    async (variables: V): Promise<T | undefined> => {
-      if (mountedRef.current) {
-        setIsLoading(true);
-        setError(undefined);
-      }
+  const mutate = React.useCallback(
+    async (variables: TVariables) => {
+      setIsLoading(true);
+      setError(null);
 
       try {
         const result = await mutationFn(variables);
-
-        if (mountedRef.current) {
-          setData(result);
-          setIsLoading(false);
-          onSuccess?.(result, variables);
-          onSettled?.(result, undefined, variables);
-        }
-
+        setData(result);
+        options?.onSuccess?.(result, variables);
         return result;
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
-
-        if (mountedRef.current) {
-          setError(error);
-          setIsLoading(false);
-          onError?.(error, variables);
-          onSettled?.(undefined, error, variables);
-        }
-
-        return undefined;
+        setError(error);
+        options?.onError?.(error, variables);
+        throw error;
+      } finally {
+        setIsLoading(false);
+        options?.onSettled?.();
       }
     },
-    [mutationFn, onSuccess, onError, onSettled]
+    [mutationFn, options]
   );
 
-  const mutate = useCallback(
-    (variables: V) => {
-      mutateAsync(variables);
-    },
-    [mutateAsync]
-  );
-
-  const reset = useCallback(() => {
+  const reset = React.useCallback(() => {
     setData(undefined);
-    setError(undefined);
+    setError(null);
     setIsLoading(false);
   }, []);
 
-  return {
-    data,
-    error,
-    isLoading,
-    isSuccess: !isLoading && !!data && !error,
-    isError: !!error,
-    mutate,
-    mutateAsync,
-    reset,
-  };
+  return { data, error, isLoading, mutate, reset };
 }
 
-export default useFetch;
+export { useFetch, useMutation };

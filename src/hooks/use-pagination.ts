@@ -15,7 +15,7 @@ export interface UsePaginationResult {
   startIndex: number;
   endIndex: number;
   hasNextPage: boolean;
-  hasPreviousPage: isFirstPage: boolean;
+  hasPreviousPage: boolean;
   isFirstPage: boolean;
   isLastPage: boolean;
   pages: (number | "...")[];

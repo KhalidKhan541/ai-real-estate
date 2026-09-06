@@ -1,95 +1,195 @@
 "use client";
 
+import * as React from "react";
+import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Button } from "./button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  BarChart3,
-  Building2,
-  Calculator,
-  Heart,
+  ChevronLeft,
+  ChevronRight,
+  Menu,
+  X,
   Home,
-  LayoutDashboard,
-  Map,
-  MessageSquare,
-  Search,
-  Settings,
-  Sparkles,
-  TrendingUp,
+  Building2,
   Users,
+  BarChart3,
+  Settings,
+  Bell,
+  Search,
 } from "lucide-react";
+import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 
-const navItems = [
-  { href: "/(dashboard)", label: "Overview", icon: LayoutDashboard },
-  { href: "/(dashboard)/properties", label: "Properties", icon: Building2 },
-  { href: "/(dashboard)/listings/manage", label: "Listings", icon: Home },
-  { href: "/(dashboard)/search", label: "Search", icon: Search },
-  { href: "/(dashboard)/search/map", label: "Map View", icon: Map },
-  { href: "/(dashboard)/agents", label: "Agents", icon: Users },
-  { href: "/(dashboard)/offers", label: "Offers", icon: MessageSquare },
-  { href: "/(dashboard)/transactions", label: "Transactions", icon: TrendingUp },
-  { href: "/(dashboard)/mortgage", label: "Calculator", icon: Calculator },
-  { href: "/(dashboard)/neighborhoods", label: "Neighborhoods", icon: Map },
-  { href: "/(dashboard)/saved", label: "Saved", icon: Heart },
-  { href: "/(dashboard)/settings", label: "Settings", icon: Settings },
-];
+interface SidebarProps {
+  children?: React.ReactNode;
+  className?: string;
+}
 
-export function Sidebar() {
-  const pathname = usePathname();
+function Sidebar({ children, className }: SidebarProps) {
+  const [collapsed, setCollapsed] = React.useState(false);
+  const [mobileOpen, setMobileOpen] = React.useState(false);
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-64 bg-white border-r z-40 flex flex-col">
-      {/* Logo */}
-      <div className="p-6 border-b">
-        <Link href="/(dashboard)" className="flex items-center gap-2">
-          <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center">
-            <Home className="h-6 w-6 text-white" />
-          </div>
-          <div>
-            <span className="text-lg font-bold text-gray-900">AI Realty</span>
-            <div className="flex items-center gap-1">
-              <Sparkles className="h-3 w-3 text-blue-500" />
-              <span className="text-xs text-blue-600 font-medium">AI Powered</span>
-            </div>
-          </div>
-        </Link>
-      </div>
+    <>
+      <button
+        type="button"
+        onClick={() => setMobileOpen(true)}
+        className="fixed left-4 top-4 z-50 rounded-lg bg-white p-2 shadow-md lg:hidden dark:bg-gray-800"
+        aria-label="Open menu"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
 
-      {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href || pathname?.startsWith(item.href + "/");
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                isActive
-                  ? "bg-blue-50 text-blue-700"
-                  : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-              }`}
-            >
-              <item.icon className={`h-5 w-5 ${isActive ? "text-blue-600" : "text-gray-400"}`} />
-              {item.label}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex flex-col border-r border-gray-200 bg-white transition-all duration-300 dark:border-gray-700 dark:bg-gray-900",
+          collapsed ? "w-16" : "w-64",
+          mobileOpen
+            ? "translate-x-0"
+            : "-translate-x-full lg:translate-x-0",
+          className
+        )}
+      >
+        <div
+          className={cn(
+            "flex h-14 items-center border-b border-gray-200 px-4 dark:border-gray-700",
+            collapsed && "justify-center px-0"
+          )}
+        >
+          {!collapsed && (
+            <Link href="/" className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600">
+                <Building2 className="h-4 w-4 text-white" />
+              </div>
+              <span className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                AI Estate
+              </span>
             </Link>
-          );
-        })}
-      </nav>
-
-      {/* AI Assistant Card */}
-      <div className="p-4">
-        <div className="bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl p-4 text-white">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="h-5 w-5" />
-            <span className="font-semibold">AI Assistant</span>
-          </div>
-          <p className="text-sm text-blue-100 mb-3">
-            Ask me anything about properties or market trends.
-          </p>
-          <button className="w-full bg-white/20 hover:bg-white/30 rounded-lg px-3 py-2 text-sm font-medium transition">
-            Start Chat
+          )}
+          {collapsed && (
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-600">
+              <Building2 className="h-4 w-4 text-white" />
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setMobileOpen(false)}
+            className="ml-auto rounded-md p-1 text-gray-400 hover:text-gray-600 lg:hidden dark:hover:text-gray-300"
+          >
+            <X className="h-5 w-5" />
           </button>
         </div>
-      </div>
-    </aside>
+
+        <ScrollArea className="flex-1 py-3">
+          {children}
+        </ScrollArea>
+
+        <div className="hidden border-t border-gray-200 p-3 lg:block dark:border-gray-700">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setCollapsed(!collapsed)}
+            className="w-full"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? (
+              <ChevronRight className="h-4 w-4" />
+            ) : (
+              <ChevronLeft className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+      </aside>
+    </>
   );
 }
+
+interface SidebarNavItemProps {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+  badge?: string | number;
+  active?: boolean;
+  collapsed?: boolean;
+}
+
+function SidebarNavItem({
+  href,
+  icon,
+  label,
+  badge,
+  active,
+  collapsed,
+}: SidebarNavItemProps) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+        active
+          ? "bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300"
+          : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100",
+        collapsed && "justify-center px-2"
+      )}
+      title={collapsed ? label : undefined}
+    >
+      <span className={cn("shrink-0", active ? "text-primary-600 dark:text-primary-400" : "")}>
+        {icon}
+      </span>
+      {!collapsed && (
+        <>
+          <span className="flex-1">{label}</span>
+          {badge && (
+            <span
+              className={cn(
+                "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold",
+                active
+                  ? "bg-primary-600 text-white"
+                  : "bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+              )}
+            >
+              {badge}
+            </span>
+          )}
+        </>
+      )}
+    </Link>
+  );
+}
+
+interface SidebarSectionProps {
+  title?: string;
+  collapsed?: boolean;
+  children: React.ReactNode;
+}
+
+function SidebarSection({ title, collapsed, children }: SidebarSectionProps) {
+  return (
+    <div className="px-3 py-1">
+      {title && !collapsed && (
+        <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+          {title}
+        </p>
+      )}
+      <div className="space-y-0.5">{children}</div>
+    </div>
+  );
+}
+
+function MainContent({ children }: { children: React.ReactNode }) {
+  return (
+    <main className="min-h-screen lg:pl-64 transition-all duration-300">
+      {children}
+    </main>
+  );
+}
+
+export { Sidebar, SidebarNavItem, SidebarSection, MainContent };
