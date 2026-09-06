@@ -1,55 +1,30 @@
-import { useState, useEffect, useRef } from "react";
+import * as React from "react";
 
-export function usePrevious<T>(value: T): T | undefined {
-  const ref = useRef<T | undefined>(undefined);
-  const [currentValue, setCurrentValue] = useState<T>(value);
+function usePrevious<T>(value: T): T | undefined {
+  const ref = React.useRef<T | undefined>(undefined);
 
-  useEffect(() => {
-    ref.current = currentValue;
-    setCurrentValue(value);
+  React.useEffect(() => {
+    ref.current = value;
   }, [value]);
 
   return ref.current;
 }
 
-export function usePreviousDistinct<T>(
-  value: T,
-  compare?: (a: T, b: T) => boolean
-): T | undefined {
-  const ref = useRef<T | undefined>(undefined);
-  const [currentValue, setCurrentValue] = useState<T>(value);
+function usePreviousDistinct<T>(value: T, compare?: (a: T, b: T) => boolean): T | undefined {
+  const ref = React.useRef<T | undefined>(undefined);
+  const currentRef = React.useRef<T>(value);
 
-  useEffect(() => {
+  React.useEffect(() => {
     const areEqual = compare
-      ? compare(ref.current as T, currentValue)
-      : ref.current === currentValue;
+      ? compare(currentRef.current, value)
+      : currentRef.current === value;
 
     if (!areEqual) {
-      ref.current = currentValue;
+      currentRef.current = value;
     }
-
-    setCurrentValue(value);
-  }, [value, compare, currentValue]);
+  }, [value, compare]);
 
   return ref.current;
 }
 
-export function usePreviousIndex<T>(values: T[]): number | undefined {
-  const ref = useRef<number | undefined>(undefined);
-  const [currentIndex, setCurrentIndex] = useState<number | undefined>(undefined);
-
-  useEffect(() => {
-    ref.current = currentIndex;
-
-    const newIndex = values.indexOf(currentValue(values[values.length - 1]));
-    setCurrentIndex(newIndex);
-  }, [values]);
-
-  return ref.current;
-}
-
-function currentValue<T>(value: T | undefined): T {
-  return value as T;
-}
-
-export default usePrevious;
+export { usePrevious, usePreviousDistinct };

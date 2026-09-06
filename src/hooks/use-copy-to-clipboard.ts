@@ -1,180 +1,91 @@
-import { useState, useCallback, useRef } from "react";
+import * as React from "react";
 
-export interface UseCopyToClipboardResult {
+interface UseCopyToClipboardResult {
   copiedText: string | null;
+  isCopied: boolean;
   copy: (text: string) => Promise<boolean>;
   reset: () => void;
 }
 
-export function useCopyToClipboard(): UseCopyToClipboardResult {
-  const [copiedText, setCopiedText] = useState<string | null>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+function useCopyToClipboard(
+  timeout: number = 2000
+): UseCopyToClipboardResult {
+  const [copiedText, setCopiedText] = React.useState<string | null>(null);
+  const [isCopied, setIsCopied] = React.useState(false);
+  const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
-  const copy = useCallback(async (text: string): Promise<boolean> => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedText(text);
-
-      timeoutRef.current = setTimeout(() => {
-        setCopiedText(null);
-      }, 2000);
-
-      return true;
-    } catch (error) {
-      try {
-        const textArea = document.createElement("textarea");
-        textArea.value = text;
-        textArea.style.position = "fixed";
-        textArea.style.left = "-999999px";
-        textArea.style.top = "-999999px";
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-
-        const successful = document.execCommand("copy");
-        document.body.removeChild(textArea);
-
-        if (successful) {
-          setCopiedText(text);
-          timeoutRef.current = setTimeout(() => {
-            setCopiedText(null);
-          }, 2000);
-          return true;
-        }
-
-        return false;
-      } catch {
-        console.error("Failed to copy text");
-        return false;
-      }
-    }
-  }, []);
-
-  const reset = useCallback(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    setCopiedText(null);
-  }, []);
-
-  return {
-    copiedText,
-    copy,
-    reset,
-  };
-}
-
-export function useCopyRichText(): {
-  copied: boolean;
-  copyRichText: (html: string, plainText: string) => Promise<boolean>;
-  reset: () => void;
-} {
-  const [copied, setCopied] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const copyRichText = useCallback(
-    async (html: string, plainText: string): Promise<boolean> => {
+  React.useEffect(() => {
+    return () => {
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
       }
+    };
+  }, []);
+
+  const copy = React.useCallback(
+    async (text: string): Promise<boolean> => {
+      if (!navigator?.clipboard) {
+        console.warn("Clipboard API not available");
+        return false;
+      }
 
       try {
-        const blob = new Blob([html], { type: "text/html" });
-        const textBlob = new Blob([plainText], { type: "text/plain" });
+        await navigator.clipboard.writeText(text);
+        setCopiedText(text);
+        setIsCopied(true);
 
-        const data = new ClipboardItem({
-          "text/html": blob,
-          "text/plain": textBlob,
-        });
-
-        await navigator.clipboard.write([data]);
-        setCopied(true);
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
 
         timeoutRef.current = setTimeout(() => {
-          setCopied(false);
-        }, 2000);
+          setIsCopied(false);
+          setCopiedText(null);
+        }, timeout);
 
         return true;
-      } catch {
-        const fallbackCopied = await navigator.clipboard.writeText(plainText);
-        setCopied(true);
+      } catch (error) {
+        // Fallback for older browsers
+        try {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.style.position = "fixed";
+          textarea.style.left = "-9999px";
+          textarea.style.top = "-9999px";
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          const success = document.execCommand("copy");
+          document.body.removeChild(textarea);
 
-        timeoutRef.current = setTimeout(() => {
-          setCopied(false);
-        }, 2000);
-
-        return true;
+          if (success) {
+            setCopiedText(text);
+            setIsCopied(true);
+            timeoutRef.current = setTimeout(() => {
+              setIsCopied(false);
+              setCopiedText(null);
+            }, timeout);
+            return true;
+          }
+          return false;
+        } catch {
+          console.error("Failed to copy text");
+          return false;
+        }
       }
     },
-    []
+    [timeout]
   );
 
-  const reset = useCallback(() => {
+  const reset = React.useCallback(() => {
+    setCopiedText(null);
+    setIsCopied(false);
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
     }
-    setCopied(false);
   }, []);
 
-  return {
-    copied,
-    copyRichText,
-    reset,
-  };
+  return { copiedText, isCopied, copy, reset };
 }
 
-export function useCopyImage(): {
-  copied: boolean;
-  copyImage: (url: string) => Promise<boolean>;
-  reset: () => void;
-} {
-  const [copied, setCopied] = useState(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  const copyImage = useCallback(async (url: string): Promise<boolean> => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          [blob.type]: blob,
-        }),
-      ]);
-
-      setCopied(true);
-
-      timeoutRef.current = setTimeout(() => {
-        setCopied(false);
-      }, 2000);
-
-      return true;
-    } catch {
-      console.error("Failed to copy image");
-      return false;
-    }
-  }, []);
-
-  const reset = useCallback(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-    setCopied(false);
-  }, []);
-
-  return {
-    copied,
-    copyImage,
-    reset,
-  };
-}
-
-export default useCopyToClipboard;
+export { useCopyToClipboard };
