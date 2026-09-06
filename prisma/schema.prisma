@@ -1,17 +1,27 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "multiSchema", "postgresqlExtensions"]
+  binaryTargets   = ["native", "rhel-openssl-1.0.x"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector")]
+  schemas    = ["public", "auth"]
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
 
 enum UserRole {
   BUYER
   SELLER
   AGENT
+  BROKER
   ADMIN
+  SUPER_ADMIN
 }
 
 enum PropertyType {
@@ -21,6 +31,8 @@ enum PropertyType {
   APARTMENT
   LAND
   COMMERCIAL
+  MULTI_FAMILY
+  FARM
   OTHER
 }
 
@@ -28,324 +40,1141 @@ enum ListingStatus {
   DRAFT
   ACTIVE
   PENDING
+  UNDER_CONTRACT
   SOLD
   EXPIRED
   WITHDRAWN
+  OFF_MARKET
 }
 
 enum OfferStatus {
-  PENDING
+  DRAFT
+  SUBMITTED
+  COUNTERED
   ACCEPTED
   REJECTED
-  COUNTERED
   EXPIRED
   WITHDRAWN
+  FALLBACK
 }
 
 enum TransactionStatus {
+  INITIATED
+  INSPECTION_PENDING
+  INSPECTION_COMPLETE
+  APPRAISAL_PENDING
+  APPRAISAL_COMPLETE
+  MORTGAGE_PENDING
+  MORTGAGE_APPROVED
+  UNDER_CONTRACT
+  CLOSING_PENDING
+  CLOSED
+  CANCELLED
+  DISPUTED
+}
+
+enum PropertyStatus {
+  FOR_SALE
+  FOR_RENT
+  SOLD
+  RENTED
+  OFF_MARKET
   PENDING
-  INSPECTION
+  FORECLOSURE
+}
+
+enum AppointmentType {
+  SHOWING
+  OPEN_HOUSE
+  HOME_INSPECTION
   APPRAISAL
-  FINANCING
   CLOSING
+  CONSULTATION
+  VIDEO_TOUR
+}
+
+enum NotificationType {
+  MESSAGE
+  APPOINTMENT
+  OFFER
+  LISTING_UPDATE
+  PRICE_CHANGE
+  DOCUMENT
+  SYSTEM
+  MARKETING
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
   COMPLETED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  VIEWED
+  PAID
+  OVERDUE
   CANCELLED
 }
 
-enum PropertyFeature {
-  GARAGE
-  POOL
-  FIREPLACE
-  AIR_CONDITIONING
-  HARDWOOD_FLOORS
-  BALCONY
-  ELEVATOR
-  GYM
-  CONCIERGE
-  PARKING
-  LAUNDRY
-  STORAGE
+enum DocumentType {
+  CONTRACT
+  DISCLOSURE
+  INSPECTION_REPORT
+  APPRAISAL
+  MORTGAGE_DOCUMENT
+  TITLE_DOCUMENT
+  DEED
+  ADDENDUM
+  OTHER
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NextAuth Models
+// ─────────────────────────────────────────────────────────────────────────────
 
 model User {
   id            String    @id @default(cuid())
-  email         String    @unique
   name          String?
-  password      String
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  password      String?
   role          UserRole  @default(BUYER)
-  avatar        String?
   phone         String?
+  isActive      Boolean   @default(true)
+  isVerified    Boolean   @default(false)
+  lastLoginAt   DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  listings      Listing[]
-  reviews       Review[]
-  savedSearches SavedSearch[]
-  offers        Offer[]
-  transactions  Transaction[]
-  favorites     Favorite[]
-  notifications Notification[]
-  sessions      Session[]
-  agent         Agent?
+  deletedAt     DateTime?
+
+  accounts            Account[]
+  sessions            Session[]
+  profile             UserProfile?
+  agentProfile        AgentProfile?
+  properties          Property[]              @relation("PropertyOwner")
+  listings            Listing[]               @relation("ListingAgent")
+  buyerTransactions   Transaction[]           @relation("BuyerTransaction")
+  sellerTransactions  Transaction[]           @relation("SellerTransaction")
+  agentTransactions   Transaction[]           @relation("AgentTransaction")
+  offersMade         Offer[]                  @relation("OfferBuyer")
+  offersReceived     Offer[]                  @relation("OfferSeller")
+  appointments        Appointment[]           @relation("AppointmentUser")
+  appointmentClients  Appointment[]           @relation("AppointmentClient")
+  savedSearches       SavedSearch[]
+  notifications       Notification[]
+  notificationPrefs   NotificationPreference?
+  reviewsGiven        Review[]                @relation("ReviewAuthor")
+  reviewsReceived     Review[]                @relation("ReviewTarget")
+  payments            Payment[]
+  invoicesIssued      Invoice[]               @relation("InvoiceIssuer")
+  invoicesReceived    Invoice[]               @relation("InvoiceRecipient")
+  searches            Search[]
+
+  @@index([email])
+  @@index([role])
+  @@index([isActive])
+  @@map("users")
+  @@schema("public")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+  @@schema("public")
 }
 
 model Session {
-  id            String   @id @default(cuid())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token         String   @unique
-  userAgent     String?
-  ipAddress     String?
-  expiresAt     DateTime
-  createdAt     DateTime @default(now())
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+  @@schema("public")
 }
 
-model Agent {
-  id            String   @id @default(cuid())
-  userId        String   @unique
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  licenseNumber String   @unique
-  agency        String?
-  bio           String?
-  specializations String[]
-  yearsExperience Int?
-  totalSales    Int      @default(0)
-  rating        Float    @default(0)
-  verified      Boolean  @default(false)
-  listings      Listing[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+  @@schema("public")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User Profile
+// ─────────────────────────────────────────────────────────────────────────────
+
+model UserProfile {
+  id           String  @id @default(cuid())
+  userId       String  @unique
+  bio          String? @db.Text
+  avatar       String?
+  coverImage   String?
+  address      String?
+  city         String?
+  state        String?
+  zipCode      String?
+  country      String  @default("US")
+  latitude     Float?
+  longitude    Float?
+  website      String?
+  linkedin     String?
+  twitter      String?
+  preferredLang String  @default("en")
+  currency     String  @default("USD")
+  timezone     String  @default("America/New_York")
+  isPublic     Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent / Broker
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AgentProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  licenseNumber   String?
+  licenseState    String?
+  licenseExpiry   DateTime?
+  brokerageName   String?
+  brokerageId     String?
+  specialization  String[]
+  yearsExperience Int?
+  languagesSpoken String[] @default(["en"])
+  serviceAreas    String[]
+  commissionRate  Float?
+  minPrice        Float?
+  maxPrice        Float?
+  isFeatured      Boolean  @default(false)
+  isVerified      Boolean  @default(false)
+  totalSales      Int      @default(0)
+  totalVolume     Float    @default(0)
+  avgDaysOnMarket Float?
+  medianPrice     Float?
+  awards          String[]
+  certifications  String[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  brokerage         Brokerage?         @relation(fields: [brokerageId], references: [id])
+  ratings           AgentRating[]
+  clientPreferences Client[]
+  transactions      Transaction[]      @relation("AgentTransaction")
+
+  @@index([userId])
+  @@index([isFeatured])
+  @@index([licenseState])
+  @@map("agent_profiles")
+  @@schema("public")
+}
+
+model Brokerage {
+  id          String   @id @default(cuid())
+  name        String
+  licenseNumber String?
+  address     String?
+  city        String?
+  state       String?
+  zipCode     String?
+  phone       String?
+  email       String?
+  website     String?
+  logo        String?
+  description String?  @db.Text
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agents      AgentProfile[]
+  listings    Listing[]
+
+  @@map("brokerages")
+  @@schema("public")
+}
+
+model AgentRating {
+  id         String  @id @default(cuid())
+  agentId    String
+  userId     String
+  rating     Int
+  title      String?
+  comment    String? @db.Text
+  isPublic   Boolean @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user  User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, userId])
+  @@index([agentId])
+  @@map("agent_ratings")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Property
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Property {
-  id            String          @id @default(cuid())
-  title         String
-  description   String
-  price         Float
-  propertyType  PropertyType
-  bedrooms      Int
-  bathrooms     Float
-  squareFeet    Int
-  lotSize       Float?
-  yearBuilt     Int?
-  address       String
-  city          String
-  state         String
-  zipCode       String
-  country       String          @default("US")
-  latitude      Float?
-  longitude     Float?
-  images        PropertyImage[]
-  features      PropertyFeature[]
-  virtualTour   VirtualTour?
-  listings      Listing[]
-  reviews       Review[]
-  neighborhoods Neighborhood[]
-  aiValuation   AIValuation?
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id              String       @id @default(cuid())
+  title           String
+  slug            String       @unique
+  description     String?      @db.Text
+  propertyType    PropertyType
+  status          PropertyStatus @default(FOR_SALE)
+  price           Float
+  pricePerSqFt    Float?
+  currency        String       @default("USD")
+  yearBuilt       Int?
+  lotSize         Float?
+  lotSizeUnit     String       @default("sqft")
+  livingArea      Float?
+  livingAreaUnit  String       @default("sqft")
+  rooms           Int?
+  bedrooms        Int?
+  bathrooms       Float?
+  halfBathrooms   Int?
+  floors          Int?
+  parkingSpaces   Int?
+  garageType      String?
+  heatingType     String?
+  coolingType     String?
+  appliances      String[]
+  flooringTypes   String[]
+  roofType        String?
+  foundationType  String?
+  poolType        String?
+  fireplaceCount  Int?
+  address         String
+  city            String
+  state           String
+  zipCode         String
+  country         String       @default("US")
+  latitude        Float?
+  longitude       Float?
+  mlsNumber       String?      @unique
+  mlsSource       String?
+  mlsUrl          String?
+  daysOnMarket    Int?
+  views           Int          @default(0)
+  favorites       Int          @default(0)
+  isFeatured      Boolean      @default(false)
+  isVirtualTour   Boolean      @default(false)
+  is3dTour        Boolean      @default(false)
+  videoUrl        String?
+  virtualTourUrl  String?
+  openHouseStart  DateTime?
+  openHouseEnd    DateTime?
+  availableFrom   DateTime?
+  hoaFee          Float?
+  taxAmount       Float?
+  taxYear         Int?
+  lastSoldDate    DateTime?
+  lastSoldPrice   Float?
+  aiInsights      Json?
+  embedding       Unsupported("vector(1536)")?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
 
-  @@index([city, state])
+  owner          User              @relation("PropertyOwner", fields: [ownerId], references: [id])
+  ownerId        String
+  images         PropertyImage[]
+  features       PropertyFeature[]
+  history        PropertyHistory[]
+  listings       Listing[]
+  offers         Offer[]
+  transactions   Transaction[]
+  virtualTours   VirtualTour[]
+  savedSearches  SavedSearch[]
+
+  @@index([ownerId])
   @@index([propertyType])
+  @@index([status])
   @@index([price])
+  @@index([city, state])
   @@index([latitude, longitude])
+  @@index([createdAt])
+  @@index([mlsNumber])
+  @@index([isFeatured])
+  @@map("properties")
+  @@schema("public")
 }
 
 model PropertyImage {
   id         String   @id @default(cuid())
   propertyId String
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   url        String
   alt        String?
-  order      Int      @default(0)
+  caption    String?
   isPrimary  Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  width      Int?
+  height     Int?
+  blurHash   String?
   createdAt  DateTime @default(now())
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@map("property_images")
+  @@schema("public")
 }
 
-model VirtualTour {
+model PropertyFeature {
   id         String   @id @default(cuid())
-  propertyId String   @unique
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  url        String
-  type       String   @default("3d")
-  provider   String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  propertyId String
+  name       String
+  value      String?
+  category   String?
+  isPremium  Boolean  @default(false)
+  sortOrder  Int      @default(0)
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@map("property_features")
+  @@schema("public")
 }
+
+model PropertyHistory {
+  id         String   @id @default(cuid())
+  propertyId String
+  event      String
+  price      Float?
+  date       DateTime
+  details    Json?
+  source     String?
+  createdAt  DateTime @default(now())
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+  @@index([date])
+  @@map("property_history")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Listings
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Listing {
-  id          String         @id @default(cuid())
-  propertyId  String
-  property    Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  agentId     String?
-  agent       Agent?         @relation(fields: [agentId], references: [id])
-  userId      String
-  user        User           @relation(fields: [userId], references: [id])
-  status      ListingStatus  @default(DRAFT)
-  price       Float
-  description String?
-  openHouse   DateTime?
-  expiresAt   DateTime?
-  views       Int            @default(0)
-  inquiries   Int            @default(0)
-  offers      Offer[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id              String        @id @default(cuid())
+  propertyId      String
+  agentId         String?
+  brokerageId     String?
+  status          ListingStatus @default(DRAFT)
+  listedPrice     Float
+  originalPrice   Float?
+  soldPrice       Float?
+  listedDate      DateTime      @default(now())
+  expiresAt       DateTime?
+  soldAt          DateTime?
+  withdrawnAt     DateTime?
+  withdrawnReason String?
+  daysOnMarket    Int?
+  openHouseDates  Json?
+  mlsNumber       String?
+  mlsSource       String?
+  mlsUrl          String?
+  description     String?       @db.Text
+  specialTerms    String?
+  isPublic        Boolean       @default(true)
+  isExclusive     Boolean       @default(false)
+  isPocketListing Boolean       @default(false)
+  commissionRate  Float?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
+  property     Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  agent        AgentProfile?   @relation(fields: [agentId], references: [id])
+  brokerage    Brokerage?      @relation(fields: [brokerageId], references: [id])
+  offers       ListingOffer[]
+  savedSearches SavedSearch[]
+
+  @@index([propertyId])
+  @@index([agentId])
   @@index([status])
-  @@index([price])
-  @@index([createdAt])
+  @@index([listedPrice])
+  @@index([listedDate])
+  @@map("listings")
+  @@schema("public")
 }
+
+model ListingOffer {
+  id        String     @id @default(cuid())
+  listingId String
+  offerId   String
+  status    String     @default("pending")
+  createdAt DateTime   @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  offer   Offer   @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@unique([listingId, offerId])
+  @@map("listing_offers")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clients (Agent's clients)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Client {
+  id              String   @id @default(cuid())
+  agentId         String
+  name            String
+  email           String?
+  phone           String?
+  budget          Float?
+  minBedrooms     Int?
+  maxBedrooms     Int?
+  minBathrooms    Float?
+  propertyTypes   PropertyType[]
+  preferredAreas  String[]
+  mustHave        String[]
+  niceToHave      String[]
+  dealBreakers    String[]
+  notes           String?  @db.Text
+  leadScore       Int?
+  leadSource      String?
+  status          String   @default("active")
+  lastContactAt   DateTime?
+  nextFollowUp    DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  agent             AgentProfile     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  appointments      Appointment[]
+  searchPreferences ClientPreference[]
+
+  @@index([agentId])
+  @@index([status])
+  @@map("clients")
+  @@schema("public")
+}
+
+model ClientPreference {
+  id        String   @id @default(cuid())
+  clientId  String
+  key       String
+  value     String
+  weight    Float    @default(1.0)
+  createdAt DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, key])
+  @@map("client_preferences")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Appointments
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Appointment {
+  id          String          @id @default(cuid())
+  userId      String
+  clientId    String?
+  propertyId  String?
+  type        AppointmentType
+  title       String
+  description String?
+  startTime   DateTime
+  endTime     DateTime
+  location    String?
+  isVirtual   Boolean         @default(false)
+  meetingUrl  String?
+  status      String          @default("scheduled")
+  reminder    Boolean         @default(true)
+  reminderAt  DateTime?
+  notes       String?         @db.Text
+  outcome     String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client   Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  property Property?   @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([startTime])
+  @@index([status])
+  @@map("appointments")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Offers
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Offer {
-  id              String      @id @default(cuid())
-  listingId       String
-  listing         Listing     @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  userId          String
-  user            User        @relation(fields: [userId], references: [id])
-  amount          Float
-  status          OfferStatus @default(PENDING)
-  conditions      String[]
-  financingType   String?
-  inspectionPeriod Int?
-  closingDate     DateTime?
-  message         String?
-  expiresAt       DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id                String     @id @default(cuid())
+  propertyId        String
+  buyerId           String
+  sellerId          String?
+  agentId           String?
+  status            OfferStatus @default(DRAFT)
+  offerPrice        Float
+  earnestMoney      Float?
+  downPayment       Float?
+  loanType          String?
+  loanAmount        Float?
+  closingDate       DateTime
+  inspectionContingency  Boolean @default(true)
+  appraisalContingency   Boolean @default(true)
+  financingContingency   Boolean @default(true)
+  saleContingency        Boolean @default(false)
+  inspectionDays    Int        @default(10)
+  closingCosts      Float?
+  sellerConcessions Float?
+  personalLetter    String?    @db.Text
+  expirationDate    DateTime
+  terms             Json?
+  notes             String?    @db.Text
+  rejectionReason   String?
+  counterPrice      Float?
+  counterTerms      Json?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
+  property     Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  buyer        User              @relation("OfferBuyer", fields: [buyerId], references: [id])
+  seller       User?             @relation("OfferSeller", fields: [sellerId], references: [id])
+  agent        AgentProfile?     @relation(fields: [agentId], references: [id])
+  transactions Transaction[]
+  listings     ListingOffer[]
+  statuses     OfferStatusHistory[]
+
+  @@index([propertyId])
+  @@index([buyerId])
   @@index([status])
-  @@index([amount])
+  @@index([createdAt])
+  @@map("offers")
+  @@schema("public")
 }
+
+model OfferStatusHistory {
+  id        String     @id @default(cuid())
+  offerId   String
+  status    OfferStatus
+  note      String?
+  changedBy String?
+  createdAt DateTime   @default(now())
+
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([offerId])
+  @@map("offer_status_history")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Transactions
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Transaction {
   id              String            @id @default(cuid())
-  listingId       String
-  offerId         String
+  propertyId      String
+  listingId       String?
   buyerId         String
-  sellerId        String
-  buyer           User              @relation("buyer", fields: [buyerId], references: [id])
-  seller          User              @relation("seller", fields: [sellerId], references: [id])
+  sellerId        String?
   agentId         String?
-  status          TransactionStatus @default(PENDING)
+  offerId         String?
+  status          TransactionStatus @default(INITIATED)
   salePrice       Float
   closingDate     DateTime?
-  actualClosing   DateTime?
+  actualClosingDate DateTime?
+  escrowNumber    String?
+  titleCompany    String?
+  titleInsurance  Float?
+  transferTax     Float?
+  homeWarranty    Float?
+  inspectionDate  DateTime?
+  inspectionResult Json?
+  appraisalDate   DateTime?
+  appraisalValue  Float?
+  mortgageId      String?
+  earnestMoneyDeposit Float?
+  earnestMoneyHeld    String?
+  closingCostsTotal   Float?
+  netToSeller     Float?
+  notes           String?           @db.Text
   documents       TransactionDocument[]
-  notes           String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
+  property   Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  listing    Listing?        @relation(fields: [listingId], references: [id])
+  buyer      User            @relation("BuyerTransaction", fields: [buyerId], references: [id])
+  seller     User?           @relation("SellerTransaction", fields: [sellerId], references: [id])
+  agent      AgentProfile?   @relation("AgentTransaction", fields: [agentId], references: [id])
+  offer      Offer?          @relation(fields: [offerId], references: [id])
+  mortgage   Mortgage?       @relation(fields: [mortgageId], references: [id])
+  timeline   TransactionTimeline[]
+  payments   Payment[]
+
+  @@index([propertyId])
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([agentId])
   @@index([status])
-  @@index([closingDate])
+  @@index([createdAt])
+  @@map("transactions")
+  @@schema("public")
 }
 
 model TransactionDocument {
-  id            String      @id @default(cuid())
+  id            String       @id @default(cuid())
   transactionId String
+  type          DocumentType
   name          String
   url           String
-  type          String
+  fileSize      Int?
+  mimeType      String?
   uploadedBy    String?
-  createdAt     DateTime    @default(now())
+  isSigned      Boolean      @default(false)
+  signedAt      DateTime?
+  metadata      Json?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@map("transaction_documents")
+  @@schema("public")
 }
 
-model SavedSearch {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  query       Json
-  alerts      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+model TransactionTimeline {
+  id            String   @id @default(cuid())
+  transactionId String
+  event         String
+  description   String?
+  actorId       String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([createdAt])
+  @@map("transaction_timeline")
+  @@schema("public")
 }
 
-model Favorite {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  propertyId String
-  createdAt  DateTime @default(now())
+// ─────────────────────────────────────────────────────────────────────────────
+// Mortgage
+// ─────────────────────────────────────────────────────────────────────────────
 
-  @@unique([userId, propertyId])
+model Mortgage {
+  id                String   @id @default(cuid())
+  transactionId     String?
+  propertyId        String?
+  buyerId           String?
+  lender            String?
+  loanType          String?
+  loanAmount        Float?
+  interestRate      Float?
+  termMonths        Int?
+  monthlyPayment    Float?
+  downPaymentPct    Float?
+  creditScore       Int?
+  preApproved       Boolean  @default(false)
+  preApprovalAmount Float?
+  preApprovalDate   DateTime?
+  preApprovalExpiry DateTime?
+  status            String   @default("pending")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  transactions Transaction[]
+
+  @@map("mortgages")
+  @@schema("public")
 }
 
-model Review {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id])
-  propertyId String
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  rating     Int
-  title      String?
-  content    String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+model MortgageCalculator {
+  id           String  @id @default(cuid())
+  userId       String?
+  homePrice    Float
+  downPayment  Float
+  loanTerm     Int
+  interestRate Float
+  propertyTax  Float?
+  insurance    Float?
+  hoaFees      Float?
+  pmi          Float?
+  monthlyTotal Float?
+  breakdown    Json?
+  createdAt    DateTime @default(now())
 
-  @@unique([userId, propertyId])
-  @@index([rating])
+  @@map("mortgage_calculators")
+  @@schema("public")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Neighborhoods
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Neighborhood {
   id          String   @id @default(cuid())
   name        String
+  slug        String   @unique
   city        String
   state       String
+  zipCode     String?
+  latitude    Float?
+  longitude   Float?
+  radius      Float?
+  description String?  @db.Text
+  image       String?
+  medianPrice Float?
+  avgDaysOnMarket Int?
+  totalListings   Int @default(0)
+  walkScore       Int?
+  transitScore    Int?
+  bikeScore       Int?
+  schoolRating    Float?
+  crimeRate       Float?
+  medianIncome    Float?
+  population      Int?
+  medianAge       Float?
+  ownerOccupied   Float?
+  vacancyRate     Float?
+  appreciation    Float?
+  aiSummary       String? @db.Text
+  embedding       Unsupported("vector(1536)")?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  scores   NeighborhoodScore[]
+  properties Property[]
+
+  @@index([slug])
+  @@index([city, state])
+  @@index([latitude, longitude])
+  @@map("neighborhoods")
+  @@schema("public")
+}
+
+model NeighborhoodScore {
+  id              String   @id @default(cuid())
+  neighborhoodId  String
+  category        String
+  score           Float
+  rank            Int?
+  details         Json?
+  source          String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  neighborhood Neighborhood @relation(fields: [neighborhoodId], references: [id], onDelete: Cascade)
+
+  @@unique([neighborhoodId, category])
+  @@map("neighborhood_scores")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Virtual Tours
+// ─────────────────────────────────────────────────────────────────────────────
+
+model VirtualTour {
+  id          String   @id @default(cuid())
+  propertyId  String
+  title       String
   description String?
-  avgPrice    Float?
-  walkScore   Int?
-  transitScore Int?
-  crimeScore  Int?
-  schools     School[]
-  properties  Property[]
+  type        String   @default("360")
+  url         String?
+  thumbnail   String?
+  floorPlan   String?
+  isPublished Boolean  @default(false)
+  viewCount   Int      @default(0)
+  duration    Int?
+  metadata    Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@unique([name, city, state])
+  property Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  stops    VirtualTourStop[]
+
+  @@index([propertyId])
+  @@map("virtual_tours")
+  @@schema("public")
 }
 
-model School {
-  id              String       @id @default(cuid())
-  neighborhoodId  String
-  neighborhood    Neighborhood @relation(fields: [neighborhoodId], references: [id], onDelete: Cascade)
-  name            String
-  type            String
-  rating          Int?
-  address         String?
+model VirtualTourStop {
+  id          String   @id @default(cuid())
+  tourId      String
+  name        String
+  description String?
+  imageUrl    String
+  position    Json?
+  sortOrder   Int      @default(0)
+  hotspots    Json?
+  audioUrl    String?
+
+  tour VirtualTour @relation(fields: [tourId], references: [id], onDelete: Cascade)
+
+  @@index([tourId])
+  @@map("virtual_tour_stops")
+  @@schema("public")
 }
 
-model AIValuation {
+// ─────────────────────────────────────────────────────────────────────────────
+// Search
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Search {
   id         String   @id @default(cuid())
-  propertyId String   @unique
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  estimate   Float
-  lowRange   Float
-  highRange  Float
-  confidence Float
-  factors    Json
-  model      String   @default("ensemble")
+  userId     String?
+  query      String
+  filters    Json?
+  resultCount Int     @default(0)
+  latency    Int?
   createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("searches")
+  @@schema("public")
 }
+
+model SavedSearch {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String
+  description   String?
+  filters       Json?
+  alertEnabled  Boolean  @default(true)
+  alertFrequency String  @default("daily")
+  lastAlertAt   DateTime?
+  resultCount   Int?
+  listingId     String?
+  propertyId    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing Listing?  @relation(fields: [listingId], references: [id])
+  property Property? @relation(fields: [propertyId], references: [id])
+
+  @@index([userId])
+  @@map("saved_searches")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications
+// ─────────────────────────────────────────────────────────────────────────────
 
 model Notification {
-  id        String   @id @default(cuid())
+  id        String           @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String
+  type      NotificationType
   title     String
   message   String
   data      Json?
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  actionUrl String?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+  @@schema("public")
 }
 
-model MarketData {
+model NotificationPreference {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  emailNotifications  Boolean  @default(true)
+  pushNotifications   Boolean  @default(true)
+  smsNotifications    Boolean  @default(false)
+  messageAlerts       Boolean  @default(true)
+  appointmentAlerts   Boolean  @default(true)
+  offerAlerts         Boolean  @default(true)
+  listingAlerts       Boolean  @default(true)
+  priceChangeAlerts   Boolean  @default(true)
+  documentAlerts      Boolean  @default(true)
+  marketingEmails     Boolean  @default(false)
+  digestFrequency     String   @default("daily")
+  quietHoursStart     String?
+  quietHoursEnd       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Payments & Invoices
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Payment {
+  id            String        @id @default(cuid())
+  userId        String
+  transactionId String?
+  amount        Float
+  currency      String        @default("USD")
+  status        PaymentStatus @default(PENDING)
+  method        String?
+  provider      String?
+  providerId    String?
+  description   String?
+  metadata      Json?
+  paidAt        DateTime?
+  refundedAt    DateTime?
+  refundAmount  Float?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id])
+  invoice     Invoice?     @relation(fields: [invoiceId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@map("payments")
+  @@schema("public")
+}
+
+model Invoice {
+  id          String       @id @default(cuid())
+  issuerId    String
+  recipientId String
+  invoiceNumber String    @unique
+  amount      Float
+  tax         Float?
+  total       Float
+  currency    String       @default("USD")
+  status      InvoiceStatus @default(DRAFT)
+  description String?
+  dueDate     DateTime?
+  paidAt      DateTime?
+  lineItems   Json?
+  notes       String?
+  pdfUrl      String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  issuer   User  @relation("InvoiceIssuer", fields: [issuerId], references: [id], onDelete: Cascade)
+  recipient User @relation("InvoiceRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([issuerId])
+  @@index([recipientId])
+  @@index([status])
+  @@map("invoices")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reviews
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Review {
+  id         String   @id @default(cuid())
+  authorId   String
+  targetId   String
+  rating     Int
+  title      String?
+  comment    String?  @db.Text
+  isPublic   Boolean  @default(true)
+  isVerified Boolean  @default(false)
+  helpful    Int      @default(0)
+  reportCount Int     @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  author   User            @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  target   User            @relation("ReviewTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  response ReviewResponse?
+
+  @@index([authorId])
+  @@index([targetId])
+  @@index([rating])
+  @@map("reviews")
+  @@schema("public")
+}
+
+model ReviewResponse {
   id        String   @id @default(cuid())
-  city      String
-  state     String
-  data      Json
-  period    String
+  reviewId  String   @unique
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@map("review_responses")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audit Log
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  oldData   Json?
+  newData   Json?
+  ipAddress String?
+  userAgent String?
   createdAt DateTime @default(now())
 
-  @@unique([city, state, period])
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+  @@schema("public")
 }
