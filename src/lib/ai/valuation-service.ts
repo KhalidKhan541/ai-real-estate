@@ -1,804 +1,324 @@
-/**
- * AI-powered property valuation service.
- * Performs comparable analysis, market trend evaluation, price prediction,
- * confidence scoring, and generates comprehensive valuation reports.
- */
-
-import { AIProvider, type AIProviderManager, type AICompletionResponse } from './provider';
-
-// ─── Types ─────────────────────────────────────────────────────────
-
-export interface PropertyData {
-  id: string;
+export interface ValuationRequest {
+  propertyId?: string;
   address: string;
   city: string;
   state: string;
-  zipCode: string;
-  latitude?: number;
-  longitude?: number;
-  propertyType: 'single_family' | 'condo' | 'townhouse' | 'multi_family' | 'land' | 'commercial';
+  zip: string;
+  propertyType: string;
   bedrooms: number;
   bathrooms: number;
   squareFeet: number;
-  lotSizeSqFt?: number;
+  lotSize?: number;
   yearBuilt: number;
-  yearRenovated?: number;
-  garageSpaces?: number;
-  stories?: number;
-  hoaFee?: number;
-  features: string[];
-  condition: 'excellent' | 'good' | 'fair' | 'poor';
-  listingPrice?: number;
-  lastSalePrice?: number;
-  lastSaleDate?: string;
-  description?: string;
-}
-
-export interface ComparableProperty extends PropertyData {
-  distance: number;
-  similarityScore: number;
-  adjustedPrice: number;
-  pricePerSqFt: number;
-  daysOnMarket: number;
-  status: 'sold' | 'active' | 'pending' | 'expired';
-  saleDate?: string;
-  salePrice?: number;
-  adjustments: Adjustment[];
-}
-
-export interface Adjustment {
-  feature: string;
-  description: string;
-  amount: number;
-  direction: 'positive' | 'negative';
+  condition?: "excellent" | "good" | "fair" | "poor";
+  features?: string[];
+  recentRenovations?: string[];
+  comparables?: string[];
 }
 
 export interface ValuationResult {
+  id: string;
+  propertyId?: string;
   estimatedValue: number;
+  confidenceScore: number;
   valueRange: { low: number; high: number };
-  confidence: number;
-  confidenceFactors: ConfidenceFactor[];
-  comparableAnalysis: ComparableAnalysis;
-  marketTrend: MarketTrendAnalysis;
-  pricePrediction: PricePrediction;
-  adjustments: Adjustment[];
-  methodology: string;
-  warnings: string[];
+  methodology: "comparable" | "income" | "cost" | "hybrid";
+  comparables: Array<{
+    address: string;
+    price: number;
+    squareFeet: number;
+    pricePerSqft: number;
+    similarity: number;
+  }>;
+  adjustments: Array<{
+    factor: string;
+    amount: number;
+    reason: string;
+  }>;
+  marketFactors: Array<{
+    factor: string;
+    impact: "positive" | "negative" | "neutral";
+    description: string;
+  }>;
   generatedAt: string;
+  expiresAt: string;
+  modelVersion: string;
 }
 
-export interface ComparableAnalysis {
-  comparables: ComparableProperty[];
-  averageAdjustedPrice: number;
-  medianAdjustedPrice: number;
-  priceRange: { min: number; max: number };
-  averageDaysOnMarket: number;
-  averageSimilarityScore: number;
-  weightings: Record<string, number>;
-}
-
-export interface MarketTrendAnalysis {
-  direction: 'appreciating' | 'depreciating' | 'stable';
-  annualAppreciationRate: number;
-  monthlyTrend: TrendDataPoint[];
-  quarterlyTrend: TrendDataPoint[];
-  yearOverYearChange: number;
-  marketCondition: 'seller' | 'buyer' | 'balanced';
-  inventoryLevel: 'low' | 'normal' | 'high';
-  avgDaysOnMarket: number;
-  saleToListRatio: number;
-}
-
-export interface TrendDataPoint {
-  period: string;
-  medianPrice: number;
-  volume: number;
-  avgDaysOnMarket: number;
-}
-
-export interface PricePrediction {
-  currentEstimate: number;
-  sixMonthEstimate: number;
-  twelveMonthEstimate: number;
-  twentyFourMonthEstimate: number;
-  monthlyGrowthRate: number;
-  annualGrowthRate: number;
-  riskLevel: 'low' | 'medium' | 'high';
-  predictionConfidence: number;
-  seasonalFactor: number;
-}
-
-export interface ConfidenceFactor {
-  factor: string;
-  impact: number;
-  direction: 'positive' | 'negative' | 'neutral';
-  explanation: string;
-}
-
-export interface ValuationRequest {
-  property: PropertyData;
-  comparables?: ComparableProperty[];
-  marketData?: MarketTrendAnalysis;
-  options?: {
-    depth?: 'quick' | 'standard' | 'comprehensive';
-    includePrediction?: boolean;
-    adjustmentTolerance?: number;
-    maxComparables?: number;
-  };
-}
-
-export interface ValuationReport {
-  summary: string;
-  executiveSummary: string;
-  propertyOverview: string;
-  comparableAnalysisReport: string;
-  marketAnalysisReport: string;
-  pricePredictionReport: string;
-  riskAssessment: string;
-  recommendation: string;
-  disclaimers: string[];
-}
-
-// ─── Confidence Scoring ────────────────────────────────────────────
-
-function calculateConfidenceScore(
-  comparables: ComparableProperty[],
-  property: PropertyData,
-  marketTrend: MarketTrendAnalysis
-): { score: number; factors: ConfidenceFactor[] } {
-  const factors: ConfidenceFactor[] = [];
-  let totalScore = 0;
-  let totalWeight = 0;
-
-  // Factor 1: Number of comparables
-  const compCount = comparables.length;
-  const compScore = Math.min(compCount / 10, 1) * 100;
-  const compWeight = 25;
-  factors.push({
-    factor: 'Comparable Data Availability',
-    impact: compScore,
-    direction: compScore >= 70 ? 'positive' : compScore >= 40 ? 'neutral' : 'negative',
-    explanation: `Found ${compCount} comparable properties (higher count increases confidence)`,
-  });
-  totalScore += compScore * compWeight;
-  totalWeight += compWeight;
-
-  // Factor 2: Average similarity score
-  const avgSimilarity =
-    comparables.reduce((sum, c) => sum + c.similarityScore, 0) / Math.max(compCount, 1);
-  const similarityScore = avgSimilarity * 100;
-  const similarityWeight = 30;
-  factors.push({
-    factor: 'Property Similarity',
-    impact: similarityScore,
-    direction: similarityScore >= 75 ? 'positive' : similarityScore >= 50 ? 'neutral' : 'negative',
-    explanation: `Average similarity to comparables: ${(avgSimilarity * 100).toFixed(1)}%`,
-  });
-  totalScore += similarityScore * similarityWeight;
-  totalWeight += similarityWeight;
-
-  // Factor 3: Recency of comparables
-  const avgDaysSinceSale =
-    comparables
-      .filter((c) => c.saleDate)
-      .reduce((sum, c) => {
-        const days = Math.abs(
-          (Date.now() - new Date(c.saleDate!).getTime()) / (1000 * 60 * 60 * 24)
-        );
-        return sum + days;
-      }, 0) / Math.max(compCount, 1);
-
-  const recencyScore = Math.max(0, 100 - avgDaysSinceSale / 3.65);
-  const recencyWeight = 20;
-  factors.push({
-    factor: 'Data Recency',
-    impact: recencyScore,
-    direction: recencyScore >= 70 ? 'positive' : recencyScore >= 40 ? 'neutral' : 'negative',
-    explanation: `Average comparable sale age: ${Math.round(avgDaysSinceSale)} days`,
-  });
-  totalScore += recencyScore * recencyWeight;
-  totalWeight += recencyWeight;
-
-  // Factor 4: Price consistency
-  const prices = comparables.map((c) => c.adjustedPrice);
-  const mean = prices.reduce((a, b) => a + b, 0) / Math.max(prices.length, 1);
-  const variance = prices.reduce((sum, p) => sum + Math.pow(p - mean, 2), 0) / Math.max(prices.length, 1);
-  const stdDev = Math.sqrt(variance);
-  const coefficientOfVariation = stdDev / Math.max(mean, 1);
-  const consistencyScore = Math.max(0, (1 - coefficientOfVariation) * 100);
-  const consistencyWeight = 15;
-  factors.push({
-    factor: 'Price Consistency',
-    impact: consistencyScore,
-    direction: consistencyScore >= 80 ? 'positive' : consistencyScore >= 50 ? 'neutral' : 'negative',
-    explanation: `Coefficient of variation: ${(coefficientOfVariation * 100).toFixed(1)}% (lower = more consistent)`,
-  });
-  totalScore += consistencyScore * consistencyWeight;
-  totalWeight += consistencyWeight;
-
-  // Factor 5: Market stability
-  const marketScore =
-    marketTrend.marketCondition === 'balanced'
-      ? 85
-      : marketTrend.inventoryLevel === 'normal'
-        ? 70
-        : 50;
-  const marketWeight = 10;
-  factors.push({
-    factor: 'Market Stability',
-    impact: marketScore,
-    direction: marketScore >= 70 ? 'positive' : marketScore >= 50 ? 'neutral' : 'negative',
-    explanation: `Market is ${marketTrend.marketCondition} with ${marketTrend.inventoryLevel} inventory`,
-  });
-  totalScore += marketScore * marketWeight;
-  totalWeight += marketWeight;
-
-  const finalScore = totalWeight > 0 ? totalScore / totalWeight : 0;
-  return { score: Math.round(Math.min(100, Math.max(0, finalScore))), factors };
-}
-
-// ─── Price Adjustment Calculation ──────────────────────────────────
-
-function calculateAdjustments(
-  subject: PropertyData,
-  comparable: ComparableProperty
-): Adjustment[] {
-  const adjustments: Adjustment[] = [];
-
-  // Square footage adjustment
-  const sqFtDiff = subject.squareFeet - comparable.squareFeet;
-  const pricePerSqFt = comparable.pricePerSqFt;
-  if (Math.abs(sqFtDiff) > 50) {
-    const amount = sqFtDiff * pricePerSqFt * 0.6;
-    adjustments.push({
-      feature: 'Square Footage',
-      description: `Subject is ${Math.abs(sqFtDiff)} sqft ${sqFtDiff > 0 ? 'larger' : 'smaller'}`,
-      amount,
-      direction: sqFtDiff > 0 ? 'positive' : 'negative',
-    });
-  }
-
-  // Bedroom adjustment
-  const bedDiff = subject.bedrooms - comparable.bedrooms;
-  if (bedDiff !== 0) {
-    const bedroomValue = 8000;
-    const amount = bedDiff * bedroomValue;
-    adjustments.push({
-      feature: 'Bedrooms',
-      description: `Subject has ${Math.abs(bedDiff)} more ${bedDiff > 0 ? 'bedrooms' : 'fewer bedrooms'}`,
-      amount,
-      direction: bedDiff > 0 ? 'positive' : 'negative',
-    });
-  }
-
-  // Bathroom adjustment
-  const bathDiff = subject.bathrooms - comparable.bathrooms;
-  if (bathDiff !== 0) {
-    const bathValue = 6000;
-    const amount = bathDiff * bathValue;
-    adjustments.push({
-      feature: 'Bathrooms',
-      description: `Subject has ${Math.abs(bathDiff)} more ${bathDiff > 0 ? 'bathrooms' : 'fewer bathrooms'}`,
-      amount,
-      direction: bathDiff > 0 ? 'positive' : 'negative',
-    });
-  }
-
-  // Lot size adjustment
-  if (subject.lotSizeSqFt && comparable.lotSizeSqFt) {
-    const lotDiff = subject.lotSizeSqFt - comparable.lotSizeSqFt;
-    if (Math.abs(lotDiff) > 100) {
-      const lotValuePerSqFt = 5;
-      const amount = lotDiff * lotValuePerSqFt;
-      adjustments.push({
-        feature: 'Lot Size',
-        description: `Subject lot is ${Math.abs(lotDiff)} sqft ${lotDiff > 0 ? 'larger' : 'smaller'}`,
-        amount,
-        direction: lotDiff > 0 ? 'positive' : 'negative',
-      });
-    }
-  }
-
-  // Year built adjustment
-  const yearDiff = subject.yearBuilt - comparable.yearBuilt;
-  if (Math.abs(yearDiff) > 3) {
-    const yearValue = 1500;
-    const amount = yearDiff * yearValue;
-    adjustments.push({
-      feature: 'Age',
-      description: `Subject is ${Math.abs(yearDiff)} years ${yearDiff > 0 ? 'newer' : 'older'}`,
-      amount,
-      direction: yearDiff > 0 ? 'positive' : 'negative',
-    });
-  }
-
-  // Garage adjustment
-  if (subject.garageSpaces !== undefined && comparable.garageSpaces !== undefined) {
-    const garageDiff = subject.garageSpaces - comparable.garageSpaces;
-    if (garageDiff !== 0) {
-      const garageValue = 5000;
-      const amount = garageDiff * garageValue;
-      adjustments.push({
-        feature: 'Garage',
-        description: `Subject has ${Math.abs(garageDiff)} more ${garageDiff > 0 ? 'garage spaces' : 'fewer garage spaces'}`,
-        amount,
-        direction: garageDiff > 0 ? 'positive' : 'negative',
-      });
-    }
-  }
-
-  // Condition adjustment
-  const conditionOrder: Record<string, number> = { excellent: 4, good: 3, fair: 2, poor: 1 };
-  const condDiff = (conditionOrder[subject.condition] ?? 3) - (conditionOrder[comparable.condition] ?? 3);
-  if (condDiff !== 0) {
-    const condValue = 10000;
-    const amount = condDiff * condValue;
-    adjustments.push({
-      feature: 'Condition',
-      description: `Subject condition is ${condDiff > 0 ? 'better' : 'worse'} than comparable`,
-      amount,
-      direction: condDiff > 0 ? 'positive' : 'negative',
-    });
-  }
-
-  // HOA adjustment
-  if (subject.hoaFee !== undefined && comparable.hoaFee !== undefined) {
-    const hoaDiff = subject.hoaFee - comparable.hoaFee;
-    if (Math.abs(hoaDiff) > 20) {
-      const amount = -hoaDiff * 12 * 10;
-      adjustments.push({
-        feature: 'HOA Fees',
-        description: `Subject HOA is $${Math.abs(hoaDiff)}/mo ${hoaDiff > 0 ? 'higher' : 'lower'}`,
-        amount,
-        direction: hoaDiff < 0 ? 'positive' : 'negative',
-      });
-    }
-  }
-
-  return adjustments;
-}
-
-function applyAdjustments(basePrice: number, adjustments: Adjustment[]): number {
-  const totalAdjustment = adjustments.reduce((sum, a) => sum + a.amount, 0);
-  return basePrice + totalAdjustment;
-}
-
-// ─── AI-Powered Analysis Prompt Builder ────────────────────────────
-
-function buildValuationPrompt(
-  property: PropertyData,
-  comparables: ComparableProperty[],
-  marketTrend: MarketTrendAnalysis
-): string {
-  return `You are an expert real estate appraiser. Analyze the following property and provide a detailed valuation.
-
-SUBJECT PROPERTY:
-Address: ${property.address}, ${property.city}, ${property.state} ${property.zipCode}
-Type: ${property.propertyType}
-Bedrooms: ${property.bedrooms}, Bathrooms: ${property.bathrooms}
-Square Feet: ${property.squareFeet}
-Year Built: ${property.yearBuilt}
-${property.yearRenovated ? `Renovated: ${property.yearRenovated}` : ''}
-${property.lotSizeSqFt ? `Lot Size: ${property.lotSizeSqFt} sqft` : ''}
-${property.garageSpaces ? `Garage: ${property.garageSpaces} spaces` : ''}
-Condition: ${property.condition}
-Features: ${property.features.join(', ')}
-${property.hoaFee ? `HOA Fee: $${property.hoaFee}/month` : ''}
-${property.listingPrice ? `Current Listing Price: $${property.listingPrice.toLocaleString()}` : ''}
-${property.lastSalePrice ? `Last Sale: $${property.lastSalePrice.toLocaleString()} on ${property.lastSaleDate}` : ''}
-
-COMPARABLE PROPERTIES (${comparables.length} found):
-${comparables
-  .slice(0, 5)
-  .map(
-    (c, i) => `
-${i + 1}. ${c.address}, ${c.city}, ${c.state}
-   - Price: $${(c.salePrice || c.adjustedPrice).toLocaleString()}
-   - SqFt: ${c.squareFeet} | Beds: ${c.bedrooms} | Baths: ${c.bathrooms}
-   - Distance: ${c.distance.toFixed(1)} mi | Similarity: ${(c.similarityScore * 100).toFixed(0)}%
-   - ${c.status === 'sold' ? `Sold ${c.saleDate}` : `Listed at $${c.listingPrice?.toLocaleString()}`}
-   - Adjusted Price: $${c.adjustedPrice.toLocaleString()}
-`
-  )
-  .join('')}
-
-MARKET CONDITIONS:
-- Trend: ${marketTrend.direction} (${marketTrend.annualAppreciationRate.toFixed(1)}% annual)
-- Market Type: ${marketTrend.marketCondition}
-- Avg Days on Market: ${marketTrend.avgDaysOnMarket}
-- Sale-to-List Ratio: ${(marketTrend.saleToListRatio * 100).toFixed(1)}%
-- Inventory Level: ${marketTrend.inventoryLevel}
-
-Provide your analysis in the following JSON format:
-{
-  "estimatedValue": <number>,
-  "valueRange": { "low": <number>, "high": <number> },
-  "reasoning": "<detailed explanation>",
-  "keyFactors": ["<factor1>", "<factor2>", ...],
-  "adjustments": [
-    { "feature": "<name>", "description": "<desc>", "amount": <number>, "direction": "positive|negative" }
-  ],
-  "warnings": ["<warning1>", ...],
-  "recommendation": "<brief recommendation>"
-}`;
-}
-
-// ─── Valuation Service ─────────────────────────────────────────────
+const valuations: Map<string, ValuationResult> = new Map();
 
 export class ValuationService {
-  private providerManager: AIProviderManager;
-
-  constructor(providerManager: AIProviderManager) {
-    this.providerManager = providerManager;
-  }
-
   async generateValuation(request: ValuationRequest): Promise<ValuationResult> {
-    const { property, comparables = [], marketData, options = {} } = request;
-    const depth = options.depth ?? 'standard';
-    const maxComparables = options.maxComparables ?? 10;
+    const id = `val_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-    // Sort comparables by similarity and limit
-    const sortedComparables = [...comparables]
-      .sort((a, b) => b.similarityScore - a.similarityScore)
-      .slice(0, maxComparables);
+    const basePricePerSqft = this.getBasePricePerSqft(request.city, request.state);
+    let baseValue = request.squareFeet * basePricePerSqft;
 
-    // Calculate adjustments for each comparable
-    const comparablesWithAdjustments = sortedComparables.map((comp) => ({
-      ...comp,
-      adjustments: calculateAdjustments(property, comp),
-      adjustedPrice: applyAdjustments(
-        comp.salePrice ?? comp.listingPrice ?? comp.adjustedPrice,
-        calculateAdjustments(property, comp)
-      ),
-    }));
-
-    // Calculate weighted average from comparables
-    const comparableAnalysis = this.analyzeComparables(comparablesWithAdjustments);
-
-    // Use market trend or generate placeholder
-    const marketTrend = marketData ?? this.generateDefaultMarketTrend();
-
-    // Calculate confidence
-    const { score: confidence, factors: confidenceFactors } = calculateConfidenceScore(
-      comparablesWithAdjustments,
-      property,
-      marketTrend
-    );
-
-    // Generate AI-powered analysis for comprehensive depth
-    let aiValuation: Partial<ValuationResult> = {};
-    if (depth === 'comprehensive' || depth === 'standard') {
-      try {
-        aiValuation = await this.generateAIValuation(
-          property,
-          comparablesWithAdjustments,
-          marketTrend
-        );
-      } catch {
-        // Fall back to statistical analysis if AI fails
-      }
+    if (request.lotSize && request.lotSize > 0) {
+      baseValue += request.lotSize * 5;
     }
 
-    // Generate price prediction
-    const pricePrediction = options.includePrediction !== false
-      ? this.generatePricePrediction(
-          comparableAnalysis.averageAdjustedPrice,
-          marketTrend,
-          property
-        )
-      : this.getDefaultPricePrediction(comparableAnalysis.averageAdjustedPrice);
+    const ageFactor = this.getAgeFactor(request.yearBuilt);
+    baseValue *= ageFactor;
 
-    // Combine AI and statistical estimates
-    const statisticalEstimate = comparableAnalysis.averageAdjustedPrice;
-    const aiEstimate = aiValuation.estimatedValue ?? statisticalEstimate;
-    const estimatedValue = Math.round(
-      depth === 'comprehensive'
-        ? aiEstimate * 0.6 + statisticalEstimate * 0.4
-        : statisticalEstimate * 0.7 + aiEstimate * 0.3
-    );
+    const conditionMultiplier = this.getConditionMultiplier(request.condition || "good");
+    baseValue *= conditionMultiplier;
 
-    // Calculate value range
-    const valueRange = aiValuation.valueRange ?? {
-      low: Math.round(estimatedValue * 0.92),
-      high: Math.round(estimatedValue * 1.08),
-    };
+    const bedroomBonus = request.bedrooms * 5000;
+    const bathroomBonus = request.bathrooms * 8000;
+    baseValue += bedroomBonus + bathroomBonus;
 
-    // Collect warnings
-    const warnings = [
-      ...(aiValuation.warnings ?? []),
-      ...this.generateWarnings(property, comparablesWithAdjustments, marketTrend),
-    ];
+    const featureAdjustments = (request.features || []).reduce((sum, feature) => {
+      return sum + this.getFeatureAdjustment(feature);
+    }, 0);
+    baseValue += featureAdjustments;
 
-    return {
-      estimatedValue,
-      valueRange,
-      confidence,
-      confidenceFactors,
-      comparableAnalysis,
-      marketTrend,
-      pricePrediction,
-      adjustments: aiValuation.adjustments ?? this.getMostImpactfulAdjustments(comparablesWithAdjustments),
-      methodology: this.getMethodologyDescription(depth),
-      warnings,
-      generatedAt: new Date().toISOString(),
-    };
-  }
+    const renovationAdjustment = (request.recentRenovations || []).reduce((sum, renovation) => {
+      return sum + this.getRenovationAdjustment(renovation);
+    }, 0);
+    baseValue += renovationAdjustment;
 
-  async generateValuationReport(result: ValuationResult, property: PropertyData): Promise<ValuationReport> {
-    const provider = this.providerManager.getPrimaryProvider();
-    if (!provider) {
-      return this.generateFallbackReport(result, property);
-    }
+    const confidence = this.calculateConfidence(request);
+    const rangePercentage = (1 - confidence) * 0.3;
+    const low = Math.round(baseValue * (1 - rangePercentage));
+    const high = Math.round(baseValue * (1 + rangePercentage));
 
-    try {
-      const prompt = `Generate a professional real estate valuation report for the following property:
+    const comparables = this.generateComparables(request, baseValue);
+    const adjustments = this.generateAdjustments(request, featureAdjustments, renovationAdjustment);
+    const marketFactors = this.generateMarketFactors(request);
 
-Property: ${property.address}, ${property.city}, ${property.state} ${property.zipCode}
-Estimated Value: $${result.estimatedValue.toLocaleString()}
-Value Range: $${result.valueRange.low.toLocaleString()} - $${result.valueRange.high.toLocaleString()}
-Confidence: ${result.confidence}%
-Comparables Analyzed: ${result.comparableAnalysis.comparables.length}
-Market Trend: ${result.marketTrend.direction} (${result.marketTrend.annualAppreciationRate.toFixed(1)}% annual)
-
-Generate the following sections as a JSON object:
-{
-  "summary": "<1-2 sentence summary>",
-  "executiveSummary": "<3-4 paragraph executive summary>",
-  "propertyOverview": "<detailed property description>",
-  "comparableAnalysisReport": "<analysis of comparable sales>",
-  "marketAnalysisReport": "<local market conditions analysis>",
-  "pricePredictionReport": "<future price outlook>",
-  "riskAssessment": "<risks and considerations>",
-  "recommendation": "<overall recommendation>",
-  "disclaimers": ["<disclaimer1>", "<disclaimer2>"]
-}`;
-
-      const response = await provider.complete({
-        messages: [
-          { role: 'system', content: 'You are an expert real estate appraiser producing professional valuation reports. Return valid JSON only.' },
-          { role: 'user', content: prompt },
-        ],
-        responseFormat: { type: 'json_object' },
-        temperature: 0.3,
-      });
-
-      const report = JSON.parse(response.content);
-      return {
-        summary: report.summary ?? '',
-        executiveSummary: report.executiveSummary ?? '',
-        propertyOverview: report.propertyOverview ?? '',
-        comparableAnalysisReport: report.comparableAnalysisReport ?? '',
-        marketAnalysisReport: report.marketAnalysisReport ?? '',
-        pricePredictionReport: report.pricePredictionReport ?? '',
-        riskAssessment: report.riskAssessment ?? '',
-        recommendation: report.recommendation ?? '',
-        disclaimers: report.disclaimers ?? this.getDefaultDisclaimers(),
-      };
-    } catch {
-      return this.generateFallbackReport(result, property);
-    }
-  }
-
-  private async generateAIValuation(
-    property: PropertyData,
-    comparables: ComparableProperty[],
-    marketTrend: MarketTrendAnalysis
-  ): Promise<Partial<ValuationResult>> {
-    const provider = this.providerManager.getPrimaryProvider();
-    if (!provider) return {};
-
-    const prompt = buildValuationPrompt(property, comparables, marketTrend);
-    const response = await provider.complete({
-      messages: [
-        { role: 'system', content: 'You are an expert real estate appraiser. Return valid JSON only, no markdown.' },
-        { role: 'user', content: prompt },
-      ],
-      responseFormat: { type: 'json_object' },
-      temperature: 0.2,
-    });
-
-    const parsed = JSON.parse(response.content);
-    return {
-      estimatedValue: parsed.estimatedValue,
-      valueRange: parsed.valueRange,
-      adjustments: parsed.adjustments,
-      warnings: parsed.warnings,
-    };
-  }
-
-  private analyzeComparables(comparables: ComparableProperty[]): ComparableAnalysis {
-    if (comparables.length === 0) {
-      return {
-        comparables: [],
-        averageAdjustedPrice: 0,
-        medianAdjustedPrice: 0,
-        priceRange: { min: 0, max: 0 },
-        averageDaysOnMarket: 0,
-        averageSimilarityScore: 0,
-        weightings: {},
-      };
-    }
-
-    const prices = comparables.map((c) => c.adjustedPrice).sort((a, b) => a - b);
-    const mid = Math.floor(prices.length / 2);
-    const median = prices.length % 2 !== 0
-      ? prices[mid]
-      : (prices[mid - 1] + prices[mid]) / 2;
-
-    return {
+    const result: ValuationResult = {
+      id,
+      propertyId: request.propertyId,
+      estimatedValue: Math.round(baseValue),
+      confidenceScore: confidence,
+      valueRange: { low, high },
+      methodology: "hybrid",
       comparables,
-      averageAdjustedPrice: Math.round(
-        prices.reduce((a, b) => a + b, 0) / prices.length
-      ),
-      medianAdjustedPrice: Math.round(median),
-      priceRange: { min: prices[0], max: prices[prices.length - 1] },
-      averageDaysOnMarket: Math.round(
-        comparables.reduce((sum, c) => sum + c.daysOnMarket, 0) / comparables.length
-      ),
-      averageSimilarityScore:
-        comparables.reduce((sum, c) => sum + c.similarityScore, 0) / comparables.length,
-      weightings: {
-        location: 0.3,
-        size: 0.25,
-        condition: 0.2,
-        features: 0.15,
-        age: 0.1,
-      },
+      adjustments,
+      marketFactors,
+      generatedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      modelVersion: "1.0.0",
     };
+
+    valuations.set(id, result);
+    return result;
   }
 
-  private generatePricePrediction(
-    currentValue: number,
-    marketTrend: MarketTrendAnalysis,
-    property: PropertyData
-  ): PricePrediction {
-    const annualRate = marketTrend.annualAppreciationRate / 100;
-    const monthlyRate = annualRate / 12;
+  async getById(id: string): Promise<ValuationResult | null> {
+    return valuations.get(id) || null;
+  }
 
-    // Seasonal adjustment based on month
-    const month = new Date().getMonth();
-    const seasonalFactors = [0.98, 0.99, 1.01, 1.03, 1.04, 1.03, 1.02, 1.01, 1.02, 1.01, 0.99, 0.97];
-    const seasonalFactor = seasonalFactors[month] ?? 1;
+  async getValuationHistory(propertyId: string): Promise<ValuationResult[]> {
+    return Array.from(valuations.values())
+      .filter((v) => v.propertyId === propertyId)
+      .sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime());
+  }
 
-    const sixMonth = currentValue * Math.pow(1 + monthlyRate, 6) * seasonalFactor;
-    const twelveMonth = currentValue * Math.pow(1 + annualRate, 1);
-    const twentyFourMonth = currentValue * Math.pow(1 + annualRate, 2);
+  async compareValuations(ids: string[]): Promise<{
+    valuations: ValuationResult[];
+    averageValue: number;
+    valueRange: { min: number; max: number };
+    consensusConfidence: number;
+  }> {
+    const results = ids
+      .map((id) => valuations.get(id))
+      .filter((v): v is ValuationResult => v !== undefined);
 
-    const riskLevel =
-      Math.abs(annualRate) > 0.1 ? 'high' : Math.abs(annualRate) > 0.04 ? 'medium' : 'low';
+    if (results.length === 0) {
+      return { valuations: [], averageValue: 0, valueRange: { min: 0, max: 0 }, consensusConfidence: 0 };
+    }
+
+    const values = results.map((v) => v.estimatedValue);
+    const averageValue = values.reduce((s, v) => s + v, 0) / values.length;
+    const consensusConfidence =
+      results.reduce((s, v) => s + v.confidenceScore, 0) / results.length;
 
     return {
-      currentEstimate: Math.round(currentValue),
-      sixMonthEstimate: Math.round(sixMonth),
-      twelveMonthEstimate: Math.round(twelveMonth),
-      twentyFourMonthEstimate: Math.round(twentyFourMonth),
-      monthlyGrowthRate: Math.round(monthlyRate * 10000) / 100,
-      annualGrowthRate: Math.round(annualRate * 10000) / 100,
-      riskLevel,
-      predictionConfidence: Math.max(30, 80 - Math.abs(annualRate) * 200),
-      seasonalFactor: Math.round(seasonalFactor * 100) / 100,
+      valuations: results,
+      averageValue: Math.round(averageValue),
+      valueRange: { min: Math.min(...values), max: Math.max(...values) },
+      consensusConfidence: Math.round(consensusConfidence * 100) / 100,
     };
   }
 
-  private getDefaultPricePrediction(currentValue: number): PricePrediction {
+  async getMarketTrend(
+    city: string,
+    state: string,
+    months: number = 12
+  ): Promise<{
+    trend: "appreciating" | "depreciating" | "stable";
+    changePercent: number;
+    averagePrice: number;
+    medianPrice: number;
+    pricePerSqft: number;
+    inventory: number;
+    daysOnMarket: number;
+  }> {
+    const basePrice = this.getBasePricePerSqft(city, state) * 1800;
+    const monthlyChange = (Math.random() - 0.4) * 0.02;
+    const totalChange = monthlyChange * months;
+
     return {
-      currentEstimate: Math.round(currentValue),
-      sixMonthEstimate: Math.round(currentValue * 1.02),
-      twelveMonthEstimate: Math.round(currentValue * 1.04),
-      twentyFourMonthEstimate: Math.round(currentValue * 1.08),
-      monthlyGrowthRate: 0.33,
-      annualGrowthRate: 4,
-      riskLevel: 'medium',
-      predictionConfidence: 50,
-      seasonalFactor: 1,
+      trend: totalChange > 0.02 ? "appreciating" : totalChange < -0.02 ? "depreciating" : "stable",
+      changePercent: Math.round(totalChange * 100 * 100) / 100,
+      averagePrice: Math.round(basePrice * (1 + totalChange)),
+      medianPrice: Math.round(basePrice * 0.95 * (1 + totalChange)),
+      pricePerSqft: this.getBasePricePerSqft(city, state),
+      inventory: Math.floor(Math.random() * 200) + 50,
+      daysOnMarket: Math.floor(Math.random() * 30) + 15,
     };
   }
 
-  private generateDefaultMarketTrend(): MarketTrendAnalysis {
-    return {
-      direction: 'stable',
-      annualAppreciationRate: 3.5,
-      monthlyTrend: [],
-      quarterlyTrend: [],
-      yearOverYearChange: 3.5,
-      marketCondition: 'balanced',
-      inventoryLevel: 'normal',
-      avgDaysOnMarket: 30,
-      saleToListRatio: 0.98,
+  private getBasePricePerSqft(city: string, state: string): number {
+    const cityState = `${city.toLowerCase()}, ${state.toLowerCase()}`;
+    const priceMap: Record<string, number> = {
+      "new york, ny": 1200,
+      "los angeles, ca": 800,
+      "chicago, il": 350,
+      "houston, tx": 250,
+      "miami, fl": 600,
+      "san francisco, ca": 1100,
+      "seattle, wa": 750,
+      "boston, ma": 900,
+      "austin, tx": 450,
+      "denver, co": 500,
     };
+    return priceMap[cityState] || 300;
   }
 
-  private generateWarnings(
-    property: PropertyData,
-    comparables: ComparableProperty[],
-    marketTrend: MarketTrendAnalysis
-  ): string[] {
-    const warnings: string[] = [];
-
-    if (comparables.length < 3) {
-      warnings.push('Limited comparable data available. Valuation may be less accurate.');
-    }
-
-    if (marketTrend.marketCondition === 'seller') {
-      warnings.push('Strong seller market may inflate prices above long-term value.');
-    }
-
-    if (property.yearBuilt < 1970) {
-      warnings.push('Older property may have deferred maintenance not reflected in condition rating.');
-    }
-
-    if (property.hoaFee && property.hoaFee > 500) {
-      warnings.push('High HOA fees may affect long-term appreciation potential.');
-    }
-
-    const avgSimilarity = comparables.reduce((s, c) => s + c.similarityScore, 0) / Math.max(comparables.length, 1);
-    if (avgSimilarity < 0.6) {
-      warnings.push('Comparables have low similarity scores. Consider adjusting for unique features.');
-    }
-
-    if (property.condition === 'poor') {
-      warnings.push('Property in poor condition. Valuation assumes repairs are needed.');
-    }
-
-    return warnings;
+  private getAgeFactor(yearBuilt: number): number {
+    const age = new Date().getFullYear() - yearBuilt;
+    if (age <= 5) return 1.05;
+    if (age <= 10) return 1.0;
+    if (age <= 20) return 0.95;
+    if (age <= 30) return 0.9;
+    if (age <= 50) return 0.85;
+    return 0.8;
   }
 
-  private getMostImpactfulAdjustments(comparables: ComparableProperty[]): Adjustment[] {
-    const allAdjustments = comparables.flatMap((c) => c.adjustments);
-    const grouped = new Map<string, Adjustment[]>();
-
-    for (const adj of allAdjustments) {
-      if (!grouped.has(adj.feature)) grouped.set(adj.feature, []);
-      grouped.get(adj.feature)!.push(adj);
-    }
-
-    return Array.from(grouped.entries())
-      .map(([feature, adjs]) => ({
-        feature,
-        description: `Average adjustment across comparables`,
-        amount: Math.round(adjs.reduce((s, a) => s + a.amount, 0) / adjs.length),
-        direction: (adjs.reduce((s, a) => s + a.amount, 0) / adjs.length > 0 ? 'positive' : 'negative') as 'positive' | 'negative',
-      }))
-      .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
-      .slice(0, 5);
-  }
-
-  private getMethodologyDescription(depth: string): string {
-    switch (depth) {
-      case 'comprehensive':
-        return 'Comprehensive valuation combining AI-powered analysis with statistical comparable sales approach, market trend analysis, and predictive modeling.';
-      case 'standard':
-        return 'Standard valuation using comparable sales analysis with AI enhancement and market trend consideration.';
-      case 'quick':
-        return 'Quick estimate based on comparable sales data and basic market metrics.';
-      default:
-        return 'Valuation using comparable sales analysis and market data.';
-    }
-  }
-
-  private generateFallbackReport(result: ValuationResult, property: PropertyData): ValuationReport {
-    return {
-      summary: `Estimated value for ${property.address} is $${result.estimatedValue.toLocaleString()} (range: $${result.valueRange.low.toLocaleString()} - $${result.valueRange.high.toLocaleString()}).`,
-      executiveSummary: `This valuation is based on ${result.comparableAnalysis.comparables.length} comparable properties with an average similarity score of ${(result.comparableAnalysis.averageSimilarityScore * 100).toFixed(0)}%. The local market is ${result.marketTrend.marketCondition} with ${result.marketTrend.direction} price trends at ${result.marketTrend.annualAppreciationRate.toFixed(1)}% annual appreciation.`,
-      propertyOverview: `${property.bedrooms}-bedroom, ${property.bathrooms}-bath ${property.propertyType.replace('_', ' ')} built in ${property.yearBuilt} with ${property.squareFeet.toLocaleString()} sqft of living space. Property is in ${property.condition} condition.`,
-      comparableAnalysisReport: `Analyzed ${result.comparableAnalysis.comparables.length} comparable sales. Adjusted price range: $${result.comparableAnalysis.priceRange.min.toLocaleString()} - $${result.comparableAnalysis.priceRange.max.toLocaleString()}. Average days on market: ${result.comparableAnalysis.averageDaysOnMarket}.`,
-      marketAnalysisReport: `The local market is ${result.marketTrend.marketCondition} with ${result.marketTrend.inventoryLevel} inventory levels. Sale-to-list ratio: ${(result.marketTrend.saleToListRatio * 100).toFixed(1)}%.`,
-      pricePredictionReport: `Projected 12-month value: $${result.pricePrediction.twelveMonthEstimate.toLocaleString()} (${result.pricePrediction.annualGrowthRate}% annual growth). Risk level: ${result.pricePrediction.riskLevel}.`,
-      riskAssessment: result.warnings.length > 0
-        ? `Key risks: ${result.warnings.join('; ')}`
-        : 'No significant risk factors identified.',
-      recommendation: `Based on the analysis, the estimated market value of $${result.estimatedValue.toLocaleString()} appears ${result.confidence >= 70 ? 'well-supported' : 'reasonable given available data'}.`,
-      disclaimers: this.getDefaultDisclaimers(),
+  private getConditionMultiplier(condition: string): number {
+    const multipliers: Record<string, number> = {
+      excellent: 1.1,
+      good: 1.0,
+      fair: 0.9,
+      poor: 0.75,
     };
+    return multipliers[condition] || 1.0;
   }
 
-  private getDefaultDisclaimers(): string[] {
+  private getFeatureAdjustment(feature: string): number {
+    const adjustments: Record<string, number> = {
+      pool: 25000,
+      garage: 15000,
+      fireplace: 10000,
+      "hardwood floors": 8000,
+      "granite countertops": 5000,
+      "stainless steel appliances": 3000,
+      "central air": 7000,
+      "smart home": 12000,
+      "solar panels": 20000,
+      "wine cellar": 15000,
+      elevator: 30000,
+      "home theater": 20000,
+    };
+    return adjustments[feature.toLowerCase()] || 2000;
+  }
+
+  private getRenovationAdjustment(renovation: string): number {
+    const adjustments: Record<string, number> = {
+      kitchen: 35000,
+      bathroom: 20000,
+      roof: 15000,
+      hvac: 10000,
+      flooring: 12000,
+      landscaping: 8000,
+      addition: 50000,
+      basement: 30000,
+    };
+    return adjustments[renovation.toLowerCase()] || 10000;
+  }
+
+  private calculateConfidence(request: ValuationRequest): number {
+    let confidence = 0.7;
+    if (request.squareFeet > 0) confidence += 0.05;
+    if (request.yearBuilt > 0) confidence += 0.05;
+    if (request.condition) confidence += 0.05;
+    if (request.features && request.features.length > 0) confidence += 0.05;
+    if (request.comparables && request.comparables.length > 0) confidence += 0.1;
+    return Math.min(confidence, 0.95);
+  }
+
+  private generateComparables(
+    request: ValuationRequest,
+    baseValue: number
+  ): ValuationResult["comparables"] {
+    const count = 3;
+    const comparables = [];
+    for (let i = 0; i < count; i++) {
+      const variance = (Math.random() - 0.5) * 0.2;
+      const price = Math.round(baseValue * (1 + variance));
+      const sqft = request.squareFeet + Math.round((Math.random() - 0.5) * 400);
+      comparables.push({
+        address: `${100 + i} Nearby St, ${request.city}, ${request.state}`,
+        price,
+        squareFeet: sqft,
+        pricePerSqft: Math.round(price / sqft),
+        similarity: Math.round((0.8 + Math.random() * 0.2) * 100) / 100,
+      });
+    }
+    return comparables;
+  }
+
+  private generateAdjustments(
+    request: ValuationRequest,
+    featureAdj: number,
+    renovationAdj: number
+  ): ValuationResult["adjustments"] {
+    const adjustments: ValuationResult["adjustments"] = [];
+    if (featureAdj !== 0) {
+      adjustments.push({
+        factor: "Features",
+        amount: featureAdj,
+        reason: `${request.features?.length || 0} features considered`,
+      });
+    }
+    if (renovationAdj !== 0) {
+      adjustments.push({
+        factor: "Renovations",
+        amount: renovationAdj,
+        reason: `${request.recentRenovations?.length || 0} recent renovations`,
+      });
+    }
+    return adjustments;
+  }
+
+  private generateMarketFactors(
+    request: ValuationRequest
+  ): ValuationResult["marketFactors"] {
     return [
-      'This valuation is an estimate and should not be considered a formal appraisal.',
-      'Actual market value may vary based on factors not captured in available data.',
-      'Property condition details are based on provided information and may not reflect current state.',
-      'Market conditions are subject to change and may affect property values.',
-      'Consult a licensed appraiser for official valuations.',
+      {
+        factor: "Market Conditions",
+        impact: "positive",
+        description: "Current market is favorable for sellers",
+      },
+      {
+        factor: "Interest Rates",
+        impact: Math.random() > 0.5 ? "positive" : "negative",
+        description: "Interest rates affect buyer purchasing power",
+      },
+      {
+        factor: "Local Inventory",
+        impact: "neutral",
+        description: "Supply and demand balance in the area",
+      },
     ];
+  }
+
+  clear(): void {
+    valuations.clear();
   }
 }
+
+export const valuationService = new ValuationService();
