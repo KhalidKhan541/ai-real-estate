@@ -1,13 +1,13 @@
-import { useState, useMemo, useCallback } from "react";
+import * as React from "react";
 
-export interface UsePaginationOptions {
+interface UsePaginationOptions {
+  totalItems: number;
   initialPage?: number;
   initialPageSize?: number;
-  totalItems: number;
   siblingCount?: number;
 }
 
-export interface UsePaginationResult {
+interface UsePaginationResult {
   currentPage: number;
   pageSize: number;
   totalPages: number;
@@ -15,7 +15,7 @@ export interface UsePaginationResult {
   startIndex: number;
   endIndex: number;
   hasNextPage: boolean;
-  hasPreviousPage: boolean;
+  hasPreviousPage: isFirstPage: boolean;
   isFirstPage: boolean;
   isLastPage: boolean;
   pages: (number | "...")[];
@@ -27,104 +27,109 @@ export interface UsePaginationResult {
   setPageSize: (size: number) => void;
 }
 
-export function usePagination(options: UsePaginationOptions): UsePaginationResult {
-  const {
-    initialPage = 1,
-    initialPageSize = 10,
-    totalItems,
-    siblingCount = 1,
-  } = options;
+function generatePaginationPages(
+  currentPage: number,
+  totalPages: number,
+  siblingCount: number
+): (number | "...")[] {
+  const totalNumbers = siblingCount * 2 + 3;
+  const totalBlocks = totalNumbers + 2;
 
-  const [currentPage, setCurrentPage] = useState(initialPage);
-  const [pageSize, setPageSizeState] = useState(initialPageSize);
+  if (totalPages <= totalBlocks) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
 
-  const totalPages = useMemo(
+  const leftSiblingIndex = Math.max(currentPage - siblingCount, 1);
+  const rightSiblingIndex = Math.min(currentPage + siblingCount, totalPages);
+
+  const shouldShowLeftDots = leftSiblingIndex > 2;
+  const shouldShowRightDots = rightSiblingIndex < totalPages - 1;
+
+  if (!shouldShowLeftDots && shouldShowRightDots) {
+    const leftItemCount = 3 + 2 * siblingCount;
+    const leftRange = Array.from({ length: leftItemCount }, (_, i) => i + 1);
+    return [...leftRange, "...", totalPages];
+  }
+
+  if (shouldShowLeftDots && !shouldShowRightDots) {
+    const rightItemCount = 3 + 2 * siblingCount;
+    const rightRange = Array.from(
+      { length: rightItemCount },
+      (_, i) => totalPages - rightItemCount + i + 1
+    );
+    return [1, "...", ...rightRange];
+  }
+
+  const middleRange = Array.from(
+    { length: rightSiblingIndex - leftSiblingIndex + 1 },
+    (_, i) => leftSiblingIndex + i
+  );
+  return [1, "...", ...middleRange, "...", totalPages];
+}
+
+function usePagination({
+  totalItems,
+  initialPage = 1,
+  initialPageSize = 10,
+  siblingCount = 1,
+}: UsePaginationOptions): UsePaginationResult {
+  const [currentPage, setCurrentPage] = React.useState(initialPage);
+  const [pageSize, setPageSizeState] = React.useState(initialPageSize);
+
+  const totalPages = React.useMemo(
     () => Math.ceil(totalItems / pageSize),
     [totalItems, pageSize]
   );
 
-  const startIndex = useMemo(
+  const startIndex = React.useMemo(
     () => (currentPage - 1) * pageSize,
     [currentPage, pageSize]
   );
 
-  const endIndex = useMemo(
+  const endIndex = React.useMemo(
     () => Math.min(startIndex + pageSize - 1, totalItems - 1),
     [startIndex, pageSize, totalItems]
   );
 
-  const hasNextPage = currentPage < totalPages;
-  const hasPreviousPage = currentPage > 1;
+  const pages = React.useMemo(
+    () => generatePaginationPages(currentPage, totalPages, siblingCount),
+    [currentPage, totalPages, siblingCount]
+  );
+
   const isFirstPage = currentPage === 1;
   const isLastPage = currentPage === totalPages;
+  const hasNextPage = !isLastPage;
+  const hasPreviousPage = !isFirstPage;
 
-  const pages = useMemo(() => {
-    const range = (start: number, end: number) => {
-      const length = end - start + 1;
-      return Array.from({ length }, (_, i) => start + i);
-    };
-
-    const totalPageNumbers = siblingCount * 2 + 5;
-
-    if (totalPages <= totalPageNumbers) {
-      return range(1, totalPages);
-    }
-
-    const leftSiblingIndex = Math.max(currentPage - siblingCount, 1);
-    const rightSiblingIndex = Math.min(currentPage + siblingCount, totalPages);
-
-    const shouldShowLeftDots = leftSiblingIndex > 2;
-    const shouldShowRightDots = rightSiblingIndex < totalPages - 2;
-
-    if (!shouldShowLeftDots && shouldShowRightDots) {
-      const leftItemCount = 3 + 2 * siblingCount;
-      const leftRange = range(1, leftItemCount);
-      return [...leftRange, "...", totalPages];
-    }
-
-    if (shouldShowLeftDots && !shouldShowRightDots) {
-      const rightItemCount = 3 + 2 * siblingCount;
-      const rightRange = range(totalPages - rightItemCount + 1, totalPages);
-      return [1, "...", ...rightRange];
-    }
-
-    if (shouldShowLeftDots && shouldShowRightDots) {
-      const middleRange = range(leftSiblingIndex, rightSiblingIndex);
-      return [1, "...", ...middleRange, "...", totalPages];
-    }
-
-    return range(1, totalPages);
-  }, [currentPage, totalPages, siblingCount]);
-
-  const setPage = useCallback(
+  const setPage = React.useCallback(
     (page: number) => {
-      const validPage = Math.max(1, Math.min(page, totalPages));
-      setCurrentPage(validPage);
+      const clampedPage = Math.max(1, Math.min(page, totalPages));
+      setCurrentPage(clampedPage);
     },
     [totalPages]
   );
 
-  const nextPage = useCallback(() => {
-    if (hasNextPage) {
-      setCurrentPage((prev) => prev + 1);
+  const nextPage = React.useCallback(() => {
+    if (!isLastPage) {
+      setCurrentPage((p) => p + 1);
     }
-  }, [hasNextPage]);
+  }, [isLastPage]);
 
-  const previousPage = useCallback(() => {
-    if (hasPreviousPage) {
-      setCurrentPage((prev) => prev - 1);
+  const previousPage = React.useCallback(() => {
+    if (!isFirstPage) {
+      setCurrentPage((p) => p - 1);
     }
-  }, [hasPreviousPage]);
+  }, [isFirstPage]);
 
-  const firstPage = useCallback(() => {
+  const firstPage = React.useCallback(() => {
     setCurrentPage(1);
   }, []);
 
-  const lastPage = useCallback(() => {
+  const lastPage = React.useCallback(() => {
     setCurrentPage(totalPages);
   }, [totalPages]);
 
-  const setPageSize = useCallback(
+  const setPageSize = React.useCallback(
     (size: number) => {
       setPageSizeState(size);
       const newTotalPages = Math.ceil(totalItems / size);
@@ -134,6 +139,12 @@ export function usePagination(options: UsePaginationOptions): UsePaginationResul
     },
     [totalItems, currentPage]
   );
+
+  React.useEffect(() => {
+    if (totalItems > 0 && currentPage > totalPages) {
+      setCurrentPage(totalPages || 1);
+    }
+  }, [totalItems, currentPage, totalPages]);
 
   return {
     currentPage,
@@ -156,37 +167,4 @@ export function usePagination(options: UsePaginationOptions): UsePaginationResul
   };
 }
 
-export function useCursorPagination<T>(
-  items: T[],
-  cursor: string | null,
-  hasMore: boolean,
-  pageSize: number = 10
-): {
-  paginatedItems: T[];
-  loadMore: () => void;
-  reset: () => void;
-  isLoadingMore: boolean;
-  hasMore: boolean;
-} {
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-
-  const paginatedItems = items;
-
-  const loadMore = useCallback(() => {
-    setIsLoadingMore(true);
-  }, []);
-
-  const reset = useCallback(() => {
-    setIsLoadingMore(false);
-  }, []);
-
-  return {
-    paginatedItems,
-    loadMore,
-    reset,
-    isLoadingMore,
-    hasMore,
-  };
-}
-
-export default usePagination;
+export { usePagination };
